@@ -1,6 +1,7 @@
 // Live usage dashboard server: serves tools/usage/index.html and refreshes the
 // payload incrementally every 10 s. Usage: node tools/usage/serve.mjs
 // (PORT env var overrides 4317). Binds 127.0.0.1 only.
+import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -16,10 +17,16 @@ const collector = createCollector();
 let payload = null;
 let etag = "";
 
-function computeEtag(p) {
-  const tsi = p.fields.indexOf("ts");
-  const lastTs = p.rows.length ? p.rows[p.rows.length - 1][tsi] : 0;
-  return `${p.rows.length}:${lastTs}`;
+export function computeEtag(p) {
+  // Content hash: catches in-place edits (streaming messages) that a
+  // row-count + last-timestamp pair misses. Rows are already sorted by ts,
+  // so a stable stringify of the row array is enough.
+  if (!p || !Array.isArray(p.rows) || !p.rows.length) return "0:empty";
+  const h = crypto.createHash("sha1");
+  h.update(String(p.rows.length));
+  h.update("|");
+  h.update(JSON.stringify(p.rows));
+  return `"${h.digest("hex").slice(0, 27)}"`;
 }
 
 function refresh() {

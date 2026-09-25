@@ -7,18 +7,24 @@
 <script src="./data.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
-  :root {
+  :root, :root[data-theme="light"] {
     --bg: #ffffff; --fg: #1a1a1a; --muted: #666; --card: #f5f5f5;
     --border: #ddd; --up: #b91c1c; --down: #15803d;
   }
+  :root[data-theme="dark"] {
+    --bg: #111113; --fg: #c6c6ce; --muted: #9a9aa3; --card: #1c1c1f;
+    --border: #333; --up: #f87171; --down: #4ade80;
+  }
   @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #111113; --fg: #e8e8e8; --muted: #a1a1aa; --card: #1c1c1f;
+    :root:not([data-theme="light"]) {
+      --bg: #111113; --fg: #c6c6ce; --muted: #9a9aa3; --card: #1c1c1f;
       --border: #333; --up: #f87171; --down: #4ade80;
     }
   }
   body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); margin: 0; padding: 16px; }
-  h1 { font-size: 1.4rem; margin: 0 0 12px; }
+  #topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  #topbar h1 { font-size: 1.4rem; margin: 0; }
+  #theme { margin-left: auto; white-space: nowrap; }
   #controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
   #controls .group { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
   button { cursor: pointer; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--fg); }
@@ -39,7 +45,13 @@
   .chart-box { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
   .chart-box h3 { margin: 0 0 6px; font-size: 0.9rem; }
   .chart-box canvas { max-height: 260px; }
-  #heatmap { display: grid; grid-template-columns: 40px repeat(24, 1fr); gap: 2px; font-size: 0.65rem; }
+  #heatmap { display: grid; grid-template-columns: 40px repeat(24, minmax(10px, 26px)); justify-content: start; gap: 2px; font-size: 0.65rem; }
+  #heatwrap { display: flex; gap: 18px; flex-wrap: wrap; align-items: start; }
+  #rhythm { flex: 0 1 340px; min-width: 210px; font-size: 0.8rem; align-self: center; }
+  #rhythm .rrow { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-bottom: 1px solid var(--border); }
+  #rhythm .rrow:last-child { border-bottom: none; }
+  #rhythm .rname { color: var(--muted); }
+  #rhythm .rval { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
   #heatmap .cell { aspect-ratio: 1; border-radius: 2px; min-width: 8px; }
   #heatmap .lbl { color: var(--muted); align-self: center; }
   table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
@@ -54,7 +66,7 @@
 </style>
 </head>
 <body>
-<h1>Token Usage</h1>
+<div id="topbar"><h1>Token Usage</h1><button id="theme" title="Cycle color theme">theme: auto</button></div>
 <div id="nousage" hidden>Run <code>npm run usage</code> first.</div>
 <div id="app" hidden>
   <div id="meta"><span id="live"><span id="live-dot"></span><span id="live-text"></span></span><span id="meta-text"></span></div>
@@ -81,6 +93,15 @@
       <label>project <select id="project"><option value="">All</option></select></label>
     </div>
     <div class="group">
+      <label>group by <select id="group">
+        <option value="model">model</option>
+        <option value="project">project</option>
+        <option value="workspace">workspace</option>
+        <option value="tool+model">tool+model</option>
+        <option value="workspace+model">workspace+model</option>
+      </select></label>
+    </div>
+    <div class="group">
       <label><input type="checkbox" id="sub" checked> Include subagents</label>
     </div>
   </div>
@@ -89,9 +110,13 @@
     <div class="chart-box"><h3>Tokens over time</h3><canvas id="c-tokens"></canvas></div>
     <div class="chart-box"><h3>Cost over time</h3><canvas id="c-cost"></canvas></div>
     <div class="chart-box"><h3>Token mix by tool</h3><canvas id="c-mix"></canvas></div>
-    <div class="chart-box"><h3>Top models</h3><canvas id="c-models"></canvas></div>
+    <div class="chart-box"><h3 id="group-title">Top models</h3><canvas id="c-models"></canvas></div>
+    <div class="chart-box"><h3>Top cost by model</h3><canvas id="c-costmodels"></canvas></div>
+    <div class="chart-box"><h3>Spend month-to-date</h3><canvas id="c-mtd"></canvas></div>
+    <div class="chart-box"><h3>Cache hit rate trend</h3><canvas id="c-hit"></canvas></div>
+    <div class="chart-box"><h3>Most expensive sessions</h3><div id="topsess"></div></div>
   </div>
-  <div class="chart-box" style="margin-bottom:14px"><h3>Activity heatmap (day × hour)</h3><div id="heatmap"></div></div>
+  <div class="chart-box" style="margin-bottom:14px"><h3>Activity heatmap — trailing 28d (day × hour) <select id="metric" style="font-size:0.8rem;font-weight:normal"><option value="tokens">tokens</option><option value="active">active</option><option value="cost">cost</option></select></h3><div id="heatwrap"><div id="heatmap"></div><div id="rhythm"></div></div></div>
   <div class="chart-box"><h3>Sessions</h3>
     <table id="sessions"><thead><tr></tr></thead><tbody></tbody></table>
     <button id="more" style="margin-top:8px">show more</button>
@@ -106,6 +131,9 @@ function expand() {
   return rows.map((r) => {
     const o = {};
     fields.forEach((f, i) => (o[f] = r[i]));
+    o.workspace ??= o.project ?? "unknown";
+    o.active ??= (o.input || 0) + (o.output || 0) + (o.tool === "opencode" ? o.reasoning || 0 : 0);
+    o.estimated ??= 0;
     return o;
   });
 }
@@ -133,16 +161,86 @@ const state = {
   preset: "30d",
   tools: new Set(TOOLS),
   project: "",
+  group: "model",
+  metric: "tokens",
   includeSub: true,
   sortKey: "total",
   sortDir: -1,
   shown: 50,
 };
 
+const LS_KEY = "usage-state-v1";
+function saveState() {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify({
+      preset: state.preset,
+      tools: [...state.tools],
+      project: state.project,
+      group: state.group,
+      metric: state.metric,
+      includeSub: state.includeSub,
+      sortKey: state.sortKey,
+      sortDir: state.sortDir,
+      from: document.getElementById("from")?.value || "",
+      to: document.getElementById("to")?.value || "",
+    }));
+  } catch { /* private mode */ }
+}
+function loadState() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch { s = null; }
+  if (!s || typeof s !== "object") return;
+  if (typeof s.preset === "string") state.preset = s.preset;
+  if (Array.isArray(s.tools) && s.tools.length) state.tools = new Set(s.tools.filter((t) => TOOLS.includes(t)));
+  if (typeof s.project === "string") state.project = s.project;
+  if (typeof s.group === "string") state.group = s.group;
+  if (typeof s.metric === "string" && ["tokens", "active", "cost"].includes(s.metric)) state.metric = s.metric;
+  if (typeof s.includeSub === "boolean") state.includeSub = s.includeSub;
+  if (typeof s.sortKey === "string") state.sortKey = s.sortKey;
+  if (s.sortDir === 1 || s.sortDir === -1) state.sortDir = s.sortDir;
+  state._from = s.from || "";
+  state._to = s.to || "";
+}
+
+const THEME_KEY = "usage-theme";
+const THEMES = ["auto", "dark", "light"];
+function themePref() {
+  try {
+    const t = localStorage.getItem(THEME_KEY);
+    return THEMES.includes(t) ? t : "auto";
+  } catch { return "auto"; }
+}
+function isDark() {
+  const t = themePref();
+  return t === "dark" || (t === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+}
+function applyTheme() {
+  const t = themePref();
+  if (t === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", t);
+  document.getElementById("theme").textContent = "theme: " + t;
+  if (window.Chart) {
+    const dark = isDark();
+    Chart.defaults.color = dark ? "#9a9aa3" : "#666";
+    Chart.defaults.borderColor = dark ? "#333" : "#ddd";
+    const tt = Chart.defaults.plugins.tooltip || (Chart.defaults.plugins.tooltip = {});
+    tt.backgroundColor = dark ? "#2a2a2e" : "#ffffff";
+    tt.titleColor = dark ? "#c6c6ce" : "#1a1a1a";
+    tt.bodyColor = dark ? "#c6c6ce" : "#1a1a1a";
+    tt.borderColor = dark ? "#444" : "#ddd";
+    tt.borderWidth = 1;
+    for (const c of Object.values(charts)) c.update("none");
+  }
+}
+function gridColor() {
+  return isDark() ? "#333" : "#ddd";
+}
+
 let ALL = [];
 function setMeta() {
+  const est = ALL.filter((r) => r.estimated).length;
   document.getElementById("meta-text").textContent =
-    ALL.length + " records · generated " +
+    ALL.length + " records" + (est ? ` (incl. ${est} estimated)` : "") + " · generated " +
     (window.USAGE ? new Date(window.USAGE.generatedAt).toLocaleString() : "—");
 }
 function refreshProjects() {
@@ -159,9 +257,20 @@ function refreshProjects() {
   sel.value = state.project;
 }
 function init() {
+  loadState();
   setMeta();
   refreshProjects();
   const sel = document.getElementById("project");
+  sel.value = state.project || "";
+  if (state._from) document.getElementById("from").value = state._from;
+  if (state._to) document.getElementById("to").value = state._to;
+  document.querySelectorAll("#presets button").forEach((b) =>
+    b.classList.toggle("active", b.dataset.range === state.preset));
+  document.querySelectorAll("#tools button").forEach((b) =>
+    b.classList.toggle("on", state.tools.has(b.dataset.tool)));
+  document.getElementById("sub").checked = state.includeSub;
+  const gsel = document.getElementById("group");
+  if (gsel) gsel.value = state.group;
   document.querySelectorAll("#presets button").forEach((b) =>
     b.addEventListener("click", () => {
       document.querySelectorAll("#presets button").forEach((x) => x.classList.remove("active"));
@@ -170,7 +279,7 @@ function init() {
       document.getElementById("from").value = "";
       document.getElementById("to").value = "";
       state.shown = 50;
-      render();
+      saveState(); render();
     })
   );
   document.querySelectorAll("#tools button").forEach((b) =>
@@ -179,12 +288,22 @@ function init() {
       if (state.tools.has(t)) { state.tools.delete(t); b.classList.remove("on"); }
       else { state.tools.add(t); b.classList.add("on"); }
       state.shown = 50;
-      render();
+      saveState(); render();
     })
   );
-  sel.addEventListener("change", () => { state.project = sel.value; state.shown = 50; render(); });
+  sel.addEventListener("change", () => { state.project = sel.value; state.shown = 50; saveState(); render(); });
+  document.getElementById("group").addEventListener("change", (e) => {
+    state.group = e.target.value; saveState(); render();
+  });
+  const msel = document.getElementById("metric");
+  if (msel) {
+    msel.value = state.metric;
+    msel.addEventListener("change", (e) => {
+      state.metric = e.target.value; saveState(); render();
+    });
+  }
   document.getElementById("sub").addEventListener("change", (e) => {
-    state.includeSub = e.target.checked; state.shown = 50; render();
+    state.includeSub = e.target.checked; state.shown = 50; saveState(); render();
   });
   const custom = () => {
     const f = document.getElementById("from").value, t = document.getElementById("to").value;
@@ -192,12 +311,13 @@ function init() {
       document.querySelectorAll("#presets button").forEach((x) => x.classList.remove("active"));
       state.preset = "custom";
       state.shown = 50;
-      render();
+      saveState(); render();
     }
   };
   document.getElementById("from").addEventListener("change", custom);
   document.getElementById("to").addEventListener("change", custom);
   document.getElementById("more").addEventListener("click", () => { state.shown += 50; render(); });
+  initTheme();
   render();
 }
 
@@ -236,41 +356,77 @@ function filtered(from, to) {
 
 function kpis(recs) {
   const s = new Set();
-  const k = { total: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, cost: 0, costN: 0 };
+  const k = { total: 0, active: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, cost: 0, costN: 0, est: 0, priced: 0, unpriced: 0 };
   for (const r of recs) {
     s.add(r.tool + ":" + r.session);
-    k.total += totalOf(r);
+    const t = totalOf(r);
+    k.total += t;
+    k.active += r.active ?? (r.input + r.output);
     k.input += r.input; k.cacheRead += r.cacheRead; k.cacheWrite += r.cacheWrite; k.output += r.output;
-    if (r.cost != null) { k.cost += r.cost; k.costN++; }
+    if (r.estimated) k.est++;
+    if (r.cost != null) { k.cost += r.cost; k.costN++; k.priced += t; }
+    else k.unpriced += t;
   }
   k.sessions = s.size;
   k.avg = k.sessions ? k.total / k.sessions : 0;
+  k.avgActive = k.sessions ? k.active / k.sessions : 0;
   const denom = k.input + k.cacheRead + k.cacheWrite;
   k.hit = denom ? k.cacheRead / denom : 0;
+  k.coverage = k.total ? k.priced / k.total : 0;
   return k;
 }
 
-function delta(cur, prev) {
-  if (prev === 0) return cur === 0 ? ["—", "flat"] : ["▲ new", "up"];
+// Today's burn pace vs trailing-30d daily average (active tokens).
+// Respects tool/project/subagent filters; comparand is always calendar-based.
+function burnStats() {
+  const now = Date.now();
+  const day = 86400000;
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  const sumActive = (recs) => recs.reduce((a, r) => a + (r.active ?? (r.input + r.output)), 0);
+  const today = sumActive(filtered(d.getTime(), now));
+  const elapsed = Math.max((now - d.getTime()) / day, 1 / 48); // floor at 30min
+  const projected = today / elapsed;
+  const base = sumActive(filtered(now - 30 * day, d.getTime())) / 30;
+  return { projected, base };
+}
+
+// Polarity: 'neg' (up is bad: tokens, cost), 'pos' (up is good: hit rate),
+// 'flat' (direction carries no signal: sessions, averages — always muted).
+// Absurd jumps cap as a ×N multiplier instead of ▲5661%.
+function delta(cur, prev, pol = "neg") {
+  if (prev === 0) return cur === 0 ? ["—", "flat"] : ["▲ new", pol === "pos" ? "down" : pol === "flat" ? "flat" : "up"];
   const pct = ((cur - prev) / Math.abs(prev)) * 100;
   if (Math.abs(pct) < 0.05) return ["0%", "flat"];
-  return [(pct > 0 ? "▲ " : "▼ ") + Math.abs(pct).toFixed(0) + "%", pct > 0 ? "up" : "down"];
+  const arrow = pct > 0 ? "▲ " : "▼ ";
+  if (pol === "flat") {
+    if (pct > 999) return [arrow + "×" + mult(cur / prev), "flat"];
+    return [arrow + Math.abs(pct).toFixed(0) + "%", "flat"];
+  }
+  if (pct > 999) return [arrow + "×" + mult(cur / prev), pct > 0 === (pol === "neg") ? "up" : "down"];
+  const good = pol === "pos" ? pct > 0 : pct < 0;
+  return [arrow + Math.abs(pct).toFixed(0) + "%", good ? "down" : "up"];
+}
+function mult(ratio) {
+  return ratio >= 100 ? String(Math.round(ratio)) : ratio.toFixed(1).replace(/\.0$/, "");
+}
+function hexA(hex, alpha) {
+  const m = String(hex).match(/^#([0-9a-f]{6})$/i);
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
 }
 
 const charts = {};
 function makeChart(id, cfg) {
-  if (charts[id]) { charts[id].data = cfg.data; charts[id].update("none"); }
+  if (charts[id]) { charts[id].data = cfg.data; charts[id].options = cfg.options; charts[id].update("none"); }
   else charts[id] = new Chart(document.getElementById(id), cfg);
 }
-function gridColor() {
-  return matchMedia("(prefers-color-scheme: dark)").matches ? "#333" : "#ddd";
-}
-
 function bucketize(recs, from, to) {
   const span = to - from;
   const mode = span <= 6 * 3600000 ? "min" : span <= 2 * 86400000 ? "hour" : span <= 120 * 86400000 ? "day" : "week";
   const minStep = (span <= 3600000 ? 5 : 15) * 60000; // 5-min buckets for 1h, 15-min up to 6h
-  const buckets = new Map();
+  const step = mode === "min" ? minStep : mode === "hour" ? 3600000 : mode === "day" ? 86400000 : 7 * 86400000;
   const keyOf = (ts) => {
     const d = new Date(ts);
     if (mode === "min") return Math.floor(ts / minStep) * minStep;
@@ -280,9 +436,17 @@ function bucketize(recs, from, to) {
     monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
     return monday.getTime();
   };
+  const blank = () => ({ claude: 0, codex: 0, opencode: 0, cost: { claude: 0, codex: 0, opencode: 0 } });
+  const buckets = new Map();
+  // Zero-fill the full span so dead hours/days render as gaps, not shifted bars.
+  if (Number.isFinite(from) && Number.isFinite(to) && to > from) {
+    for (let t = keyOf(from); t <= to; t += step) {
+      if (!buckets.has(t)) buckets.set(t, { ts: t, ...blank() });
+    }
+  }
   for (const r of recs) {
     const k = keyOf(r.ts);
-    if (!buckets.has(k)) buckets.set(k, { ts: k, claude: 0, codex: 0, opencode: 0, cost: { claude: 0, codex: 0, opencode: 0 } });
+    if (!buckets.has(k)) buckets.set(k, { ts: k, ...blank() });
     const b = buckets.get(k);
     b[r.tool] += totalOf(r);
     if (r.cost != null) b.cost[r.tool] += r.cost;
@@ -293,62 +457,97 @@ function bucketLabel(ts, from, to) {
   const span = to - from;
   const d = new Date(ts);
   if (span <= 6 * 3600000) return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  if (span <= 2 * 86400000) return d.toLocaleString([], { month: "numeric", day: "numeric", hour: "numeric" });
+  if (span <= 2 * 86400000) {
+    // Single-day window: hour alone ("1 AM"), no repeated "9/25" on every tick.
+    if (new Date(from).toDateString() === new Date(to).toDateString()) {
+      return d.toLocaleTimeString([], { hour: "numeric" });
+    }
+    return d.toLocaleString([], { month: "numeric", day: "numeric", hour: "numeric" });
+  }
   return d.toLocaleDateString([], { month: "numeric", day: "numeric" });
 }
 
 function render() {
   const [from, to] = range();
   const recs = filtered(from, to);
-  const len = to - from;
-  const prev = filtered(from - len, from - 1);
+  // Intraday presets compare against the same clock window yesterday;
+  // comparing against the dead overnight hours is pure noise.
+  const day = 86400000;
+  const prev = (state.preset === "1h" || state.preset === "6h" || state.preset === "today")
+    ? filtered(from - day, to - day)
+    : filtered(from - (to - from), from - 1);
   renderKpis(recs, prev);
   renderTimeCharts(recs, from, to);
   renderMix(recs);
   renderModels(recs);
-  renderHeat(recs);
+  renderCostModels(recs);
+  renderMtd();
+  renderHitTrend(recs, from, to);
+  renderCostSessions(recs);
+  renderHeat(filtered(Date.now() - 28 * day, Date.now())); // heatmap always trailing 28d
   renderTable(recs);
+}
+
+function costPerMillionActive(a) {
+  return a.active > 0 && a.cost ? "$" + (a.cost / a.active * 1e6).toFixed(2) + "/1M active" : "";
+}
+
+// Zero isn't a direction: no cache writes today is absence, not improvement.
+function zeroNeutral(cur, prev) {
+  return cur === 0 ? ["—", "flat"] : delta(cur, prev, "neg");
 }
 
 function renderKpis(recs, prev) {
   const a = kpis(recs), b = kpis(prev);
+  const burn = burnStats();
   const tiles = [
-    ["Total tokens", fmt(a.total), delta(a.total, b.total)],
-    ["Fresh input", fmt(a.input), delta(a.input, b.input)],
-    ["Cache read", fmt(a.cacheRead), delta(a.cacheRead, b.cacheRead)],
-    ["Cache write", fmt(a.cacheWrite), delta(a.cacheWrite, b.cacheWrite)],
-    ["Output", fmt(a.output), delta(a.output, b.output)],
-    ["Cache hit rate", (a.hit * 100).toFixed(1) + "%", delta(a.hit, b.hit)],
-    ["Est. cost", money(a.cost), delta(a.cost, b.cost)],
-    ["Sessions", String(a.sessions), delta(a.sessions, b.sessions)],
-    ["Avg tok/session", fmt(a.avg), delta(a.avg, b.avg)],
+    ["Total tokens", fmt(a.total), delta(a.total, b.total, "neg")],
+    ["Active tokens", fmt(a.active), delta(a.active, b.active, "neg")],
+    ["Burn rate", fmt(burn.projected) + " proj", delta(burn.projected, burn.base, "neg"), "today pace vs 30d avg"],
+    ["Fresh input", fmt(a.input), delta(a.input, b.input, "neg")],
+    ["Cache read", fmt(a.cacheRead), delta(a.cacheRead, b.cacheRead, "neg")],
+    ["Cache write", fmt(a.cacheWrite), zeroNeutral(a.cacheWrite, b.cacheWrite)],
+    ["Output", fmt(a.output), delta(a.output, b.output, "neg")],
+    ["Cache hit rate", (a.hit * 100).toFixed(1) + "%", delta(a.hit, b.hit, "pos")],
+    ["Est. cost", money(a.cost), delta(a.cost, b.cost, "neg"), costPerMillionActive(a)],
+    ["Cost coverage", (a.coverage * 100).toFixed(1) + "%", delta(a.coverage, b.coverage, "pos"), a.unpriced ? fmt(a.unpriced) + " unpriced" : ""],
+    ["Sessions", String(a.sessions), delta(a.sessions, b.sessions, "flat")],
+    ["Avg active/session", fmt(a.avgActive), delta(a.avgActive, b.avgActive, "flat")],
   ];
   document.getElementById("kpis").innerHTML = tiles
-    .map(([n, v, [d, c]]) => `<div class="kpi"><div class="name">${n}</div><div class="val">${v}</div><div class="delta ${c}">${d}</div></div>`)
+    .map(([n, v, [d, c], sub]) => `<div class="kpi"><div class="name">${n}</div><div class="val">${v}</div><div class="delta ${c}">${d}</div>${sub ? `<div class="delta flat" title="Unit cost on real work (cache excluded)">${sub}</div>` : ""}</div>`)
     .join("");
 }
 
 function renderTimeCharts(recs, from, to) {
   const buckets = bucketize(recs, from, to);
   const labels = buckets.map((b) => bucketLabel(b.ts, from, to));
+  const live = TOOLS.filter((t) => buckets.some((b) => b[t] > 0 || b.cost[t] > 0));
+  const shown = live.length ? live : TOOLS;
+  // The trailing bucket is still accumulating when the range ends at now.
+  const partial = buckets.length > 1 && to >= Date.now() - 60000;
+  const last = buckets.length - 1;
+  const barColor = (t) => buckets.map((_, i) => (partial && i === last ? hexA(COLORS[t], 0.45) : COLORS[t]));
+  const progressFooter = (items) =>
+    partial && items.length && items[0].dataIndex === last ? "current period in progress" : "";
   makeChart("c-tokens", {
     type: "bar",
     data: {
       labels,
-      datasets: TOOLS.map((t) => ({ label: t, data: buckets.map((b) => b[t]), backgroundColor: COLORS[t] })),
+      datasets: shown.map((t) => ({ label: t, data: buckets.map((b) => b[t]), backgroundColor: barColor(t) })),
     },
-    options: { responsive: true, scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: fmt } } } },
+    options: { responsive: true, plugins: { tooltip: { callbacks: { footer: progressFooter } } }, scales: { x: { stacked: true, ticks: { maxTicksLimit: 12 } }, y: { stacked: true, ticks: { callback: fmt } } } },
   });
   makeChart("c-cost", {
     type: "line",
     data: {
       labels,
-      datasets: TOOLS.map((t) => ({
+      datasets: shown.map((t) => ({
         label: t, data: buckets.map((b) => Math.round(b.cost[t] * 100) / 100),
-        borderColor: COLORS[t], backgroundColor: COLORS[t], tension: 0.2,
+        borderColor: COLORS[t], backgroundColor: COLORS[t], tension: 0.3, cubicInterpolationMode: "monotone",
       })),
     },
-    options: { responsive: true, scales: { y: { ticks: { callback: (v) => "$" + v } } } },
+    options: { responsive: true, plugins: { tooltip: { callbacks: { footer: progressFooter } } }, scales: { x: { ticks: { maxTicksLimit: 12 } }, y: { ticks: { callback: (v) => "$" + v } } } },
   });
 }
 
@@ -361,23 +560,40 @@ function renderMix(recs) {
     agg[r.tool].cacheWrite += r.cacheWrite;
     agg[r.tool].output += r.output + (r.tool === "opencode" ? r.reasoning : 0);
   }
+  const rows = TOOLS.filter((t) => agg[t].input + agg[t].cacheRead + agg[t].cacheWrite + agg[t].output > 0);
+  const shown = rows.length ? rows : TOOLS;
   const parts = [
     ["input", "#8888cc"], ["cacheRead", "#4caf7d"], ["cacheWrite", "#e0a100"], ["output", "#d97757"],
   ];
   makeChart("c-mix", {
     type: "bar",
     data: {
-      labels: TOOLS,
-      datasets: parts.map(([k, c]) => ({ label: k, data: TOOLS.map((t) => agg[t][k]), backgroundColor: c })),
+      labels: shown,
+      datasets: parts.map(([k, c]) => ({ label: k, data: shown.map((t) => agg[t][k]), backgroundColor: c })),
     },
     options: { indexAxis: "y", responsive: true, scales: { x: { stacked: true, ticks: { callback: fmt } }, y: { stacked: true } } },
   });
 }
 
+function groupKey(r) {
+  switch (state.group) {
+    case "project": return r.project;
+    case "workspace": return r.workspace;
+    case "tool+model": return `${r.tool}:${r.model}`;
+    case "workspace+model": return `${r.workspace}:${r.model}`;
+    default: return r.model;
+  }
+}
+
 function renderModels(recs) {
-  const byModel = {};
-  for (const r of recs) byModel[r.model] = (byModel[r.model] || 0) + totalOf(r);
-  const top = Object.entries(byModel).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const agg = {};
+  for (const r of recs) {
+    const k = groupKey(r);
+    agg[k] = (agg[k] || 0) + totalOf(r);
+  }
+  const titles = { model: "Top models", project: "Top projects", workspace: "Top workspaces", "tool+model": "Top tool+model", "workspace+model": "Top workspace+model" };
+  document.getElementById("group-title").textContent = titles[state.group] || "Top models";
+  const top = Object.entries(agg).sort((a, b) => b[1] - a[1]).slice(0, 10);
   makeChart("c-models", {
     type: "bar",
     data: {
@@ -388,11 +604,126 @@ function renderModels(recs) {
   });
 }
 
+function dayKey(ts) {
+  const d = new Date(ts);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+function renderMtd() {
+  const now = Date.now();
+  const start = new Date();
+  start.setDate(1);
+  start.setHours(0, 0, 0, 0);
+  const recs = filtered(start.getTime(), now);
+  const perDay = new Map();
+  for (const r of recs) {
+    if (r.cost == null) continue;
+    const k = dayKey(r.ts);
+    perDay.set(k, (perDay.get(k) || 0) + r.cost);
+  }
+  const labels = [];
+  const data = [];
+  let cum = 0;
+  for (let t = start.getTime(); t <= now; t += 86400000) {
+    const k = dayKey(t);
+    cum += perDay.get(k) || 0;
+    labels.push(new Date(t).toLocaleDateString([], { month: "numeric", day: "numeric" }));
+    data.push(Math.round(cum * 100) / 100);
+  }
+  makeChart("c-mtd", {
+    type: "line",
+    data: { labels, datasets: [{ label: "cumulative cost", data, borderColor: "#e0a100", backgroundColor: "#e0a100", tension: 0.2, fill: true }] },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: (v) => "$" + v } } } },
+  });
+}
+
+function renderHitTrend(recs, from, to) {
+  const perDay = new Map();
+  const blank = () => ({ input: 0, cacheRead: 0, cacheWrite: 0 });
+  if (Number.isFinite(from) && Number.isFinite(to) && to > from) {
+    for (let t = dayKey(from); t <= to; t += 86400000) perDay.set(t, blank());
+  }
+  for (const r of recs) {
+    const k = dayKey(r.ts);
+    if (!perDay.has(k)) perDay.set(k, blank());
+    const b = perDay.get(k);
+    b.input += r.input; b.cacheRead += r.cacheRead; b.cacheWrite += r.cacheWrite;
+  }
+  const keys = [...perDay.keys()].sort((x, y) => x - y);
+  const labels = keys.map((t) => new Date(t).toLocaleDateString([], { month: "numeric", day: "numeric" }));
+  const data = keys.map((t) => {
+    const b = perDay.get(t);
+    const denom = b.input + b.cacheRead + b.cacheWrite;
+    return denom ? Math.round(b.cacheRead / denom * 1000) / 10 : null;
+  });
+  makeChart("c-hit", {
+    type: "line",
+    data: { labels, datasets: [{ label: "hit rate %", data, borderColor: "#4caf7d", backgroundColor: "#4caf7d", tension: 0.2, spanGaps: true }] },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 100, ticks: { callback: (v) => v + "%" } } } },
+  });
+}
+
+function renderCostSessions(recs) {
+  const groups = new Map();
+  for (const r of recs) {
+    if (r.cost == null) continue;
+    const k = r.tool + ":" + r.session;
+    if (!groups.has(k)) groups.set(k, { tool: r.tool, title: r.title || r.session.slice(0, 8), cost: 0, total: 0 });
+    const g = groups.get(k);
+    g.cost += r.cost;
+    g.total += totalOf(r);
+  }
+  const top = [...groups.values()].sort((a, b) => b.cost - a.cost).slice(0, 10);
+  document.getElementById("topsess").innerHTML = top.length
+    ? `<table><tbody>${top.map((g) => `<tr><td><span class="dot" style="background:${COLORS[g.tool]}"></span>${g.tool}</td><td title="${String(g.title).replace(/"/g, "&quot;")}">${String(g.title).length > 34 ? String(g.title).slice(0, 34) + "…" : g.title}</td><td class="num">${fmt(g.total)}</td><td class="num">${money(g.cost)}</td></tr>`).join("")}</tbody></table>`
+    : '<div style="color:var(--muted);font-size:0.8rem">No priced sessions in range.</div>';
+}
+
+function renderCostModels(recs) {
+  const agg = {};
+  for (const r of recs) {
+    if (r.cost == null) continue;
+    agg[r.model] = (agg[r.model] || 0) + r.cost;
+  }
+  const top = Object.entries(agg).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  makeChart("c-costmodels", {
+    type: "bar",
+    data: {
+      labels: top.map(([m]) => m),
+      datasets: [{ data: top.map(([, v]) => Math.round(v * 100) / 100), backgroundColor: "#e0a100" }],
+    },
+    options: { indexAxis: "y", responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { callback: (v) => "$" + v } } } },
+  });
+}
+
+function metricVal(r) {
+  if (state.metric === "active") return r.active ?? (r.input + r.output);
+  if (state.metric === "cost") return r.cost || 0;
+  return totalOf(r);
+}
+function metricFmt(v) {
+  return state.metric === "cost" ? money(v) : fmt(v);
+}
+
 function renderHeat(recs) {
   const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
+  const perHour = Array(24).fill(0);
+  const perDay = Array(7).fill(0);
+  const perDate = new Map();
+  const sessions = new Set();
+  let total = 0;
   for (const r of recs) {
+    const v = metricVal(r);
     const d = new Date(r.ts);
-    grid[(d.getDay() + 6) % 7][d.getHours()] += totalOf(r);
+    const di = (d.getDay() + 6) % 7;
+    const h = d.getHours();
+    grid[di][h] += v;
+    perHour[h] += v;
+    perDay[di] += v;
+    total += v;
+    sessions.add(r.tool + ":" + r.session);
+    const key = d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate();
+    perDate.set(key, (perDate.get(key) || 0) + v);
   }
   const max = Math.max(1, ...grid.flat());
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -403,17 +734,46 @@ function renderHeat(recs) {
     row.forEach((v) => {
       const a = v / max;
       const bg = v ? `rgba(110,86,207,${(0.1 + 0.9 * a).toFixed(2)})` : "transparent";
-      html += `<div class="cell" title="${fmt(v)} tokens" style="background:${bg};border:1px solid var(--border)"></div>`;
+      html += `<div class="cell" title="${metricFmt(v)}${state.metric === "cost" ? "" : " " + state.metric}" style="background:${bg};border:1px solid var(--border)"></div>`;
     });
   });
   document.getElementById("heatmap").innerHTML = html;
+  // Rhythm stats from the same window.
+  const peakH = perHour.indexOf(Math.max(...perHour));
+  const peakD = perDay.indexOf(Math.max(...perDay));
+  const quietD = perDay.indexOf(Math.min(...perDay));
+  const night = perHour.slice(0, 6).reduce((x, y) => x + y, 0);
+  const weekend = perDay[5] + perDay[6];
+  let streak = 0, run = 0;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  for (let i = 27; i >= 0; i--) {
+    const d = new Date(today.getTime() - i * 86400000);
+    const hit = (perDate.get(d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate()) || 0) > 0;
+    run = hit ? run + 1 : 0;
+    streak = Math.max(streak, run);
+  }
+  const pct = (v) => (total ? (v / total * 100).toFixed(0) + "%" : "—");
+  const costTotal = recs.reduce((x, r) => x + (r.cost || 0), 0);
+  const rows = [
+    ["Peak hour", peakH + ":00 · " + metricFmt(perHour[peakH])],
+    ["Peak weekday", days[peakD] + " · " + metricFmt(perDay[peakD])],
+    ["Quietest weekday", days[quietD] + " · " + metricFmt(perDay[quietD])],
+    ["Night share (0–6h)", pct(night)],
+    ["Weekend share", pct(weekend)],
+    ["Active-day streak", streak + "d"],
+    ["Sessions in window", String(sessions.size)],
+    ["Cost in window", money(costTotal)],
+  ];
+  document.getElementById("rhythm").innerHTML =
+    rows.map(([n, v]) => `<div class="rrow"><span class="rname">${n}</span><span class="rval">${v}</span></div>`).join("");
 }
 
 const COLS = [
-  ["tool", "Tool"], ["project", "Project"], ["title", "Title / session"],
+  ["tool", "Tool"], ["project", "Project"], ["workspace", "Workspace"], ["title", "Title / session"],
   ["models", "Model(s)"], ["start", "Start"], ["duration", "Duration"],
   ["input", "Input"], ["cacheRead", "Cache read"], ["output", "Output"],
-  ["total", "Total"], ["cost", "Cost"],
+  ["active", "Active"], ["total", "Total"], ["cost", "Cost"],
 ];
 let lastRecs = [];
 
@@ -423,56 +783,74 @@ function renderTable(recs) {
     const k = r.tool + ":" + r.session;
     if (!groups.has(k)) {
       groups.set(k, {
-        tool: r.tool, session: r.session, title: r.title, project: r.project,
+        tool: r.tool, session: r.session, title: r.title, project: r.project, workspace: r.workspace,
         models: new Set(), start: r.ts, end: r.ts,
-        input: 0, cacheRead: 0, output: 0, total: 0, cost: 0, costKnown: false,
+        input: 0, cacheRead: 0, output: 0, active: 0, total: 0, cost: 0, costKnown: false, est: false,
       });
     }
     const g = groups.get(k);
     g.models.add(r.model);
     g.start = Math.min(g.start, r.ts); g.end = Math.max(g.end, r.ts);
     g.input += r.input; g.cacheRead += r.cacheRead; g.output += r.output;
+    g.active += r.active ?? (r.input + r.output);
     g.total += totalOf(r);
+    if (r.estimated) g.est = true;
     if (r.cost != null) { g.cost += r.cost; g.costKnown = true; }
   }
   lastRecs = [...groups.values()].map((g) => ({
     ...g, models: [...g.models].join(", "), duration: g.end - g.start,
     cost: g.costKnown ? g.cost : null,
   }));
-  const thead = document.querySelector("#sessions thead tr");
-  thead.innerHTML = COLS.map(([k, lbl]) => {
-    const arrow = state.sortKey === k ? (state.sortDir === 1 ? " ▲" : " ▼") : "";
-    const cls = ["input", "cacheRead", "output", "total", "cost", "duration"].includes(k) ? ' class="num"' : "";
-    return `<th data-k="${k}"${cls}>${lbl}${arrow}</th>`;
-  }).join("");
-  thead.querySelectorAll("th").forEach((th) =>
-    th.addEventListener("click", () => {
-      const k = th.dataset.k;
-      if (state.sortKey === k) state.sortDir *= -1;
-      else { state.sortKey = k; state.sortDir = k === "tool" || k === "project" || k === "title" || k === "models" ? 1 : -1; }
-      renderTable(recs);
-    })
-  );
   lastRecs.sort((a, b) => {
     const x = a[state.sortKey], y = b[state.sortKey];
     if (x == null && y == null) return 0;
     if (x == null) return 1; if (y == null) return -1;
     return (x < y ? -1 : x > y ? 1 : 0) * state.sortDir;
   });
+  let show = lastRecs.slice(0, state.shown);
+  // Workspace column only earns its pixels when it differs from project
+  // in the visible rows (hidden groups can't justify it).
+  let showWs = show.some((g) => g.workspace && g.workspace !== g.project);
+  if (!showWs && state.sortKey === "workspace") {
+    state.sortKey = "project";
+    lastRecs.sort((a, b) => {
+      const x = a[state.sortKey], y = b[state.sortKey];
+      if (x == null && y == null) return 0;
+      if (x == null) return 1; if (y == null) return -1;
+      return (x < y ? -1 : x > y ? 1 : 0) * state.sortDir;
+    });
+    show = lastRecs.slice(0, state.shown);
+    showWs = show.some((g) => g.workspace && g.workspace !== g.project);
+  }
+  const cols = COLS.filter(([k]) => k !== "workspace" || showWs);
+  const thead = document.querySelector("#sessions thead tr");
+  thead.innerHTML = cols.map(([k, lbl]) => {
+    const arrow = state.sortKey === k ? (state.sortDir === 1 ? " ▲" : " ▼") : "";
+    const cls = ["input", "cacheRead", "output", "active", "total", "cost", "duration"].includes(k) ? ' class="num"' : "";
+    return `<th data-k="${k}"${cls}>${lbl}${arrow}</th>`;
+  }).join("");
+  thead.querySelectorAll("th").forEach((th) =>
+    th.addEventListener("click", () => {
+      const k = th.dataset.k;
+      if (state.sortKey === k) state.sortDir *= -1;
+      else { state.sortKey = k; state.sortDir = k === "tool" || k === "project" || k === "workspace" || k === "title" || k === "models" ? 1 : -1; }
+      saveState(); renderTable(recs);
+    })
+  );
   const tbody = document.querySelector("#sessions tbody");
-  const show = lastRecs.slice(0, state.shown);
   tbody.innerHTML = show.map((g) => {
-    const label = g.title || g.session.slice(0, 8);
-    const tip = (g.title ? g.title + " · " + g.session : g.session).replace(/"/g, "&quot;");
+    const label = (g.title || g.session.slice(0, 8)) + (g.est ? " ~" : "");
+    const tip = ((g.title ? g.title + " · " + g.session : g.session) + (g.est ? " · incl. estimated" : "")).replace(/"/g, "&quot;");
     const start = new Date(g.start).toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
     return `<tr>
       <td><span class="dot" style="background:${COLORS[g.tool]}"></span>${g.tool}</td>
       <td>${g.project}</td>
+      ${showWs ? `<td>${g.workspace}</td>` : ""}
       <td title="${tip}">${label.length > 40 ? label.slice(0, 40) + "…" : label}</td>
       <td>${g.models.length > 40 ? g.models.slice(0, 40) + "…" : g.models}</td>
       <td>${start}</td><td>${dur(g.duration)}</td>
       <td class="num">${fmt(g.input)}</td><td class="num">${fmt(g.cacheRead)}</td>
-      <td class="num">${fmt(g.output)}</td><td class="num">${fmt(g.total)}</td>
+      <td class="num">${fmt(g.output)}</td><td class="num">${fmt(g.active)}</td><td class="num">${fmt(g.total)}</td>
       <td class="num">${money(g.cost)}</td>
     </tr>`;
   }).join("");
@@ -546,8 +924,23 @@ function startLive() {
   setInterval(tickLive, 1000);
 }
 
+function initTheme() {
+  document.getElementById("theme").addEventListener("click", () => {
+    const next = THEMES[(THEMES.indexOf(themePref()) + 1) % THEMES.length];
+    try { localStorage.setItem(THEME_KEY, next); } catch { /* private mode */ }
+    applyTheme();
+  });
+  try {
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      if (themePref() === "auto") applyTheme();
+    });
+  } catch { /* older browsers */ }
+  applyTheme();
+}
+
 if (!window.USAGE && !LIVE) {
   document.getElementById("nousage").hidden = false;
+  initTheme();
 } else {
   document.getElementById("app").hidden = false;
   if (window.USAGE) ALL = expand();

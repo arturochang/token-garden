@@ -1,0 +1,14 @@
+{
+  "name": "agent-usage",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local token usage dashboard for Claude Code, Codex and OpenCode. Never deployed.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "usage": "node collect.mjs",
+    "usage:serve": "node serve.mjs"
+  }
+}
