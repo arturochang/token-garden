@@ -2,4 +2,6 @@ data.js
 node_modules/
 prices-cache.json
 snapshot.json
+.usage-cache.json
+.usage-prefs.json
 

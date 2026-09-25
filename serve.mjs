@@ -17,6 +17,20 @@ const collector = createCollector();
 let payload = null;
 let etag = "";
 
+// UI prefs shared across browsers/ports/restarts. Local copy in the page is
+// instant; this file is the durable quorum (last write wins via updatedAt).
+const PREF_KEYS = ["preset", "tools", "project", "group", "metric", "mixPct", "logT", "logC", "prevT", "prevC",
+  "gnomes", "collapsed", "includeSub", "sortKey", "sortDir", "from", "to"];
+const prefsFile = process.env.USAGE_PREFS ?? path.join(here, ".usage-prefs.json");
+function readPrefs() {
+  try {
+    const p = JSON.parse(fs.readFileSync(prefsFile, "utf8"));
+    return p && typeof p === "object" ? p : null;
+  } catch {
+    return null;
+  }
+}
+
 export function computeEtag(p) {
   // Content hash: catches in-place edits (streaming messages) that a
   // row-count + last-timestamp pair misses. Rows are already sorted by ts,
@@ -47,6 +61,36 @@ const server = http.createServer((req, res) => {
   if (req.method === "GET" && url.pathname === "/") {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(fs.readFileSync(indexFile, "utf8"));
+  } else if (req.method === "GET" && url.pathname === "/api/prefs") {
+    const p = readPrefs();
+    if (!p) {
+      res.writeHead(404, { "Cache-Control": "no-store" });
+      res.end("{}");
+    } else {
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(JSON.stringify(p));
+    }
+  } else if (req.method === "POST" && url.pathname === "/api/prefs") {
+    let body = "";
+    req.on("data", (c) => {
+      body += c;
+      if (body.length > 16384) req.destroy(); // prefs are <1KB; drop floods
+    });
+    req.on("end", () => {
+      try {
+        const raw = JSON.parse(body);
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("bad prefs");
+        const clean = {};
+        for (const k of PREF_KEYS) if (raw[k] !== undefined) clean[k] = raw[k];
+        clean.updatedAt = Date.now(); // server stamps: last write wins
+        fs.writeFileSync(prefsFile, JSON.stringify(clean), "utf8");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end('{"ok":true}');
+      } catch {
+        res.writeHead(400);
+        res.end("bad prefs");
+      }
+    });
   } else if (req.method === "GET" && url.pathname === "/api/usage") {
     if (req.headers["if-none-match"] === etag) {
       res.writeHead(304);
@@ -66,7 +110,22 @@ const server = http.createServer((req, res) => {
   }
 });
 
+server.on("error", (err) => {
+  if (err && err.code === "EADDRINUSE") {
+    console.error(`port ${PORT} busy: another usage server already running? (quit it or set PORT=4321)`);
+    process.exit(1);
+  }
+  throw err;
+});
+
+console.log("usage: collecting… (first run parses all sessions, can take under a minute)");
 refresh(); // collect once at startup
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.on(sig, () => {
+    try { collector.flush(); } catch { /* best effort */ }
+    process.exit(0);
+  });
+}
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`usage: live at http://127.0.0.1:${PORT}`);
   const tick = () => {

@@ -92,14 +92,22 @@ function textFromContent(content) {
     .join(" ");
 }
 
+function stripLeadTags(s) {
+  return String(s || "").replace(/^(<[^>\n]{1,40}>\s*)+/, "").trim();
+}
+
 function isLowValueTitle(v) {
-  const t = String(v || "").trim().toLowerCase();
-  return !t || t.length < 8 || t.startsWith("<environment_context>") ||
-    t.includes("# agents.md instructions") || t.includes("<cwd>");
+  const t = stripLeadTags(v);
+  const lower = t.toLowerCase();
+  if (!t || t.length < 8 || lower.startsWith("<environment_context>") ||
+    lower.includes("# agents.md instructions") || lower.includes("<cwd>")) return true;
+  // IDE/UI chrome, not the user's words: fall through to the next candidate.
+  return /^(the user (selected|opened|clicked|closed|ran|typed|pasted)|caveat:|<(command|terminal|shell|selection))[^a-z0-9]*/i.test(t) ||
+    /^\/[a-z][\w-]*/i.test(t); // slash-commands (/clear, /init, …)
 }
 
 function cleanTitle(v, max = 120) {
-  const t = String(v || "").replace(/\s+/g, " ").trim();
+  const t = stripLeadTags(String(v || "").replace(/\s+/g, " "));
   if (!t || isLowValueTitle(t)) return "";
   return t.slice(0, max);
 }
@@ -421,8 +429,9 @@ function parseCodexFile(file) {
 
 // Refresh the per-file cache: re-parse only files that are new or whose mtime
 // or size changed. Drops files that no longer exist. Returns all cached
-// records in walk order.
-function refreshCache(cache, files, parse) {
+// records in walk order. onMiss fires per re-parsed file (used to mark the
+// disk cache dirty).
+function refreshCache(cache, files, parse, onMiss) {
   const seen = new Set(files);
   for (const gone of [...cache.keys()]) {
     if (!seen.has(gone)) cache.delete(gone);
@@ -442,6 +451,7 @@ function refreshCache(cache, files, parse) {
     } else {
       const records = parse(file);
       cache.set(file, { mtimeMs: st.mtimeMs, size: st.size, records });
+      if (onMiss) onMiss();
       all.push(...records);
     }
   }
@@ -454,17 +464,56 @@ function totalOf(r) {
   return r.input + r.cacheRead + r.cacheWrite + r.output + (r.tool === "opencode" ? r.reasoning : 0);
 }
 
-export function createCollector() {
+export function createCollector(opts = {}) {
   const claudeCache = new Map(); // path -> { mtimeMs, size, records }
   const codexCache = new Map();
   let db = null; // single readOnly DatabaseSync for the life of the process
   let dbFailed = false;
   let prevOpencode = [];
 
+  // Disk cache: warm starts stat files (fast) and re-parse only changed ones.
+  // Bump CACHE_VERSION whenever record shape or parsers change.
+  const CACHE_VERSION = 3;
+  const cacheFile = opts.cacheFile ?? process.env.USAGE_CACHE ?? path.join(here, ".usage-cache.json");
+  let cacheDirty = false;
+  let lastSave = 0;
+  try {
+    const raw = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
+    if (raw && raw.version === CACHE_VERSION && raw.files) {
+      for (const [k, v] of Object.entries(raw.files.claude || {})) claudeCache.set(k, v);
+      for (const [k, v] of Object.entries(raw.files.codex || {})) codexCache.set(k, v);
+    }
+  } catch { /* cold start */ }
+  const markDirty = () => { cacheDirty = true; };
+  function flushCache(force = false) {
+    if (!cacheDirty) return false;
+    const now = Date.now();
+    if (!force && now - lastSave < 60_000) return false; // at most 1 write/min
+    try {
+      fs.writeFileSync(
+        cacheFile,
+        JSON.stringify({
+          version: CACHE_VERSION,
+          savedAt: new Date().toISOString(),
+          files: {
+            claude: Object.fromEntries(claudeCache),
+            codex: Object.fromEntries(codexCache),
+          },
+        }),
+        "utf8"
+      );
+    } catch {
+      return false;
+    }
+    cacheDirty = false;
+    lastSave = now;
+    return true;
+  }
+
   function collectClaude() {
     const root = path.join(home, ".claude", "projects");
     const files = walkJsonl(root, (name) => name.endsWith(".jsonl"));
-    const cached = refreshCache(claudeCache, files, parseClaudeFile);
+    const cached = refreshCache(claudeCache, files, parseClaudeFile, markDirty);
     // Dedupe across files on message.id:requestId, first wins.
     const seen = new Set();
     const records = [];
@@ -479,7 +528,7 @@ export function createCollector() {
   function collectCodex() {
     const root = path.join(home, ".codex", "sessions");
     const files = walkJsonl(root, (name) => name.startsWith("rollout-") && name.endsWith(".jsonl"));
-    return refreshCache(codexCache, files, parseCodexFile);
+    return refreshCache(codexCache, files, parseCodexFile, markDirty);
   }
 
   function collectOpencode() {
@@ -572,10 +621,11 @@ export function createCollector() {
     const all = [...byTool.claude, ...byTool.codex, ...byTool.opencode];
     all.sort((a, b) => a.ts - b.ts);
     const rows = all.map((r) => FIELDS.map((f) => r[f] ?? null));
+    flushCache(); // best-effort, throttled; serve also flushes on exit
     return { generatedAt: Date.now(), fields: FIELDS, rows };
   }
 
-  return { collect };
+  return { collect, flush: () => flushCache(true) };
 }
 
 function summarize(payload, name) {

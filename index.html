@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Usage Dashboard</title>
-<script src="./data.js"></script>
+<title>Token Garden</title>
+<!-- data.js loads dynamically below (static snapshots only); live mode uses /api/usage -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
   :root, :root[data-theme="light"] {
@@ -24,8 +24,9 @@
   body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); margin: 0; padding: 16px; }
   #topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
   #topbar h1 { font-size: 1.4rem; margin: 0; }
-  #theme { margin-left: auto; white-space: nowrap; }
-  #controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+  #gnomes { margin-left: auto; white-space: nowrap; }
+  #theme { white-space: nowrap; }
+  #controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; position: sticky; top: 0; z-index: 50; background: var(--bg); padding: 8px 0; }
   #controls .group { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
   button { cursor: pointer; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--fg); }
   button.active { background: var(--fg); color: var(--bg); }
@@ -63,16 +64,118 @@
   #meta { color: var(--muted); font-size: 0.8rem; margin-bottom: 10px; }
   #live { margin-right: 10px; white-space: nowrap; }
   #live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+  #crew { display: flex; gap: 8px; align-items: flex-end; margin-left: 8px; padding-top: 12px; }
+  #crew[hidden] { display: none; }
+  .gnome { width: 58px; text-align: center; cursor: pointer; position: relative; border-radius: 6px; }
+  .gnome svg { width: 40px; height: 40px; display: block; margin: 0 auto; overflow: visible; }
+  .gnome .tlabel { font-size: 0.6rem; color: var(--muted); line-height: 1.2; }
+  .gnome .rlabel { font-size: 0.65rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .gnome .bob { animation: gbob var(--spd, 1.2s) ease-in-out infinite; }
+  .gnome .swing { animation: gswing var(--spd, 1.2s) ease-in-out infinite; transform-box: fill-box; transform-origin: 15% 85%; }
+  @keyframes gbob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+  @keyframes gswing { 0%, 100% { transform: rotate(-18deg); } 50% { transform: rotate(24deg); } }
+  .gnome.idle svg { transform: rotate(18deg) translateY(5px); filter: grayscale(0.75); opacity: 0.7; }
+  .gnome.idle .bob, .gnome.idle .swing { animation-play-state: paused; }
+  .gnome .zzz { display: none; position: absolute; top: -8px; right: 8px; font-size: 0.75rem; font-weight: 700; color: var(--muted); }
+  .gnome.idle .zzz { display: block; animation: zfloat 2.2s ease-in-out infinite; }
+  @keyframes zfloat { 0% { transform: translateY(2px); opacity: 0; } 30% { opacity: 1; } 100% { transform: translateY(-8px); opacity: 0; } }
+  .gnome.off { opacity: 0.3; filter: grayscale(1); }
+  .gnome.off .bob, .gnome.off .swing { animation-play-state: paused; }
+  .gnome .dust { display: none; position: absolute; bottom: 8px; left: 8px; width: 5px; height: 5px; border-radius: 50%; background: var(--muted); }
+  .gnome.frenzy .dust { display: block; animation: dpuff var(--spd, 0.5s) ease-out infinite; }
+  .gnome.frenzy .d2 { animation-delay: calc(var(--spd, 0.5s) / 2); }
+  @keyframes dpuff { 0% { transform: translate(0, 0) scale(1); opacity: 0.8; } 100% { transform: translate(-14px, -4px) scale(0.3); opacity: 0; } }
+  .gnome.frenzy .bob, .gnome.frenzy .swing { animation-timing-function: linear; }
+  .gnome .haul { display: flex; align-items: center; justify-content: center; gap: 4px; margin-top: 1px; min-height: 12px; }
+  .gnome .sack { color: #e0a100; line-height: 1; }
+  .porter { display: inline-block; vertical-align: -2px; margin-right: 2px; }
+  .porter .ghead { width: 100%; height: auto; display: block; }  .gnome .cart { width: 22px; height: 5px; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+  .gnome .cart i { display: block; height: 100%; background: #4caf7d; }
+  .kpi { position: relative; }
+  .kpi .name { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 22px; }
+  .kpi .name .nametext { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .kpi .val { white-space: nowrap; }
+  .mascot { display: flex; align-items: center; height: 22px; flex: none; }
+  .mascot .ghead, .acct .ghead, .recep > .ghead, .lift .ghead { width: 22px; height: 22px; display: block; }
+  .wheel { position: relative; width: 24px; height: 24px; display: block; }
+  .wheel .rim { position: absolute; inset: 0; border: 2px dashed var(--muted); border-radius: 50%; animation: wspin var(--wspd, 0.8s) linear infinite; }
+  @keyframes wspin { to { transform: rotate(360deg); } }
+  .wheel .ham { position: absolute; inset: 4px; animation: gbob var(--wspd, 0.8s) ease-in-out infinite; }
+  .wheel .ham .ghead { width: 100%; height: 100%; }
+  .wheel .sweat { display: none; position: absolute; top: -2px; right: -3px; width: 4px; height: 6px; border-radius: 50%; background: #7cc4ff; }
+  .wheel.pant .ham { animation-play-state: paused; transform: rotate(24deg); }
+  .wheel.pant .rim { animation-duration: calc(var(--wspd, 0.8s) * 3); }
+  .wheel.pant .sweat { display: block; animation: zfloat 1.6s ease-in-out infinite; }
+  .acct { position: relative; display: block; width: 24px; height: 24px; }
+  .acct .stmp { position: absolute; right: -2px; bottom: -2px; width: 12px; height: 12px; border-radius: 3px; background: #4caf7d; color: #fff; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; animation: stamp 2.4s ease-in-out infinite; }
+  .acct.audit .stmp { background: #e0a100; border-radius: 50%; }
+  @keyframes stamp { 0%, 100% { transform: translateY(-3px) scale(1); } 12% { transform: translateY(1px) scale(1.25); } 24% { transform: translateY(-3px) scale(1); } }
+  .lift { display: flex; align-items: center; gap: 2px; }
+  .lift .bar { position: relative; height: 4px; background: #9aa0a6; border-radius: 2px; animation: strain 0.9s ease-in-out infinite; }
+  .lift .bar i { position: absolute; top: -3px; width: 3px; height: 10px; background: #9aa0a6; border-radius: 1px; }
+  .lift .bar i:first-child { left: 0; } .lift .bar i:last-child { right: 0; }
+  @keyframes strain { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.5px); } }
+  .recep { position: relative; display: block; }
+  .recep .wave { position: absolute; top: 2px; right: -4px; width: 5px; height: 9px; border-radius: 3px; background: #f2c9a0; transform-origin: bottom center; animation: wavehi 1.2s ease-in-out infinite; }
+  @keyframes wavehi { 0%, 100% { transform: rotate(-25deg); } 50% { transform: rotate(30deg); } }
+  .recep .guest { position: absolute; left: -8px; bottom: -2px; width: 12px; height: 12px; animation: guestpop 0.5s ease-out; }
+  .recep .guest .ghead { width: 100%; height: 100%; }
+  @keyframes guestpop { 0% { transform: translateY(8px) scale(0.4); opacity: 0; } 100% { transform: none; opacity: 1; } }
+  .pflag { display: inline-block; vertical-align: -2px; animation: flagwave 2s ease-in-out infinite; transform-origin: left center; }
+  @keyframes flagwave { 0%, 100% { transform: skewX(0); } 50% { transform: skewX(-8deg); } }
+  .fisher svg, .pflag svg { width: 14px; height: 14px; vertical-align: -2px; }
+  #heatmap .cell { position: relative; overflow: hidden; }
+  #heatmap .cell.stilly::after { content: "≈"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--muted); opacity: 0.55; }
+  #heatmap .cell.strike { outline: 2px solid #e0a100; outline-offset: -2px; }
+  .lookout { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; }
+  .lookout svg { width: 100%; height: 100%; }
+  .lookout.scope svg { animation: scan 3s ease-in-out infinite; transform-origin: center; }
+  @keyframes scan { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg); } }
+  .lookout.snooze { filter: grayscale(1); opacity: 0.6; }
+  .lookout.snooze svg { transform: rotate(20deg); }
+  .lookout.down { opacity: 0.5; }
+  .lookout.down svg { transform: rotate(35deg); }
+  .courier { display: inline-block; width: 15px; height: 15px; vertical-align: -2px; margin-left: 6px; }
+  .courier svg { width: 100%; height: 100%; }
+  .courier.fresh svg { animation: guestpop 0.5s ease-out; }
+  #subbaby { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; margin-left: 2px; }
+  #subbaby .ghead { width: 100%; height: 100%; }
+  #sub:not(:checked) ~ #subbaby { opacity: 0.15; filter: grayscale(1); }
+  .clerk { display: none; width: 18px; height: 18px; vertical-align: -3px; margin-left: 4px; }
+  .clerk svg { width: 100%; height: 100%; }
+  body.custom-range .clerk { display: inline-block; }
+  .merch { position: relative; display: block; }
+  .merch .tag { position: absolute; right: -4px; bottom: -2px; background: #e0a100; color: #111; font-size: 8px; font-weight: 700; border-radius: 2px; padding: 0 2px; }
+  .merch.faint { transform: rotate(25deg); filter: saturate(0.4); }
+  .bucket svg { width: 18px; height: 18px; display: block; }
+  .bucket.full svg { animation: slosh 1.4s ease-in-out infinite; transform-origin: top center; }
+  @keyframes slosh { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(6deg); } }
+  #mtdglass svg { width: 11px; height: 16px; vertical-align: -3px; }
+  .shrug { width: 26px; height: 26px; vertical-align: middle; margin-right: 6px; }
+  .wrestle { display: inline-flex; align-items: center; margin-left: 6px; vertical-align: -3px; }
+  .wrestle .ghead { width: 16px; height: 16px; }
+  .wrestle .ghead:first-of-type { transform: rotate(-12deg); animation: strain 0.9s ease-in-out infinite; }
+  .wrestle .ghead:last-of-type { transform: rotate(12deg); animation: strain 0.9s ease-in-out infinite reverse; }
+  .wrestle .vs { font-size: 0.6rem; color: var(--muted); margin: 0 2px; }
+  .spark { width: 100%; height: 18px; display: block; margin: 2px 0 6px; opacity: 0.85; }
+  .fold { padding: 0 6px; margin-right: 6px; font-size: 0.75rem; }
+  .chart-box.shut > :not(h3) { display: none; }
+  body.napping *, body.napping *::before, body.napping *::after { animation-play-state: paused !important; }
+  body.nognomes .mascot, body.nognomes .porter, body.nognomes .pflag, body.nognomes .fisher,
+  body.nognomes .clerk, body.nognomes #subbaby, body.nognomes #lookout, body.nognomes #courier,
+  body.nognomes #mtdglass, body.nognomes .wrestle, body.nognomes .shrug { display: none !important; }
+  @media (prefers-reduced-motion: reduce) { .gnome .bob, .gnome .swing, .gnome .dust, .gnome.idle .zzz, .wheel .rim, .wheel .ham, .acct .stmp, .lift .bar, .recep .wave, .pflag, .lookout.scope svg, .courier.fresh svg, .bucket.full svg { animation: none; } }
 </style>
 </head>
 <body>
-<div id="topbar"><h1>Token Usage</h1><button id="theme" title="Cycle color theme">theme: auto</button></div>
+<div id="topbar"><h1>Token Garden</h1><div id="crew" title="Gnome work speed follows active tokens/sec per tool"></div><button id="gnomes" title="Toggle garden gnome crew">gnomes: on</button><button id="theme" title="Cycle color theme">theme: auto</button></div>
 <div id="nousage" hidden>Run <code>npm run usage</code> first.</div>
 <div id="app" hidden>
-  <div id="meta"><span id="live"><span id="live-dot"></span><span id="live-text"></span></span><span id="meta-text"></span></div>
+  <div id="meta"><span id="live"><span id="lookout"></span><span id="live-dot"></span><span id="live-text"></span></span><span id="meta-text"></span><span id="courier"></span></div>
   <div id="controls">
     <div class="group" id="presets">
       <button data-range="1h">1h</button>
+      <button data-range="3h">3h</button>
       <button data-range="6h">6h</button>
       <button data-range="today">Today</button>
       <button data-range="7d">7d</button>
@@ -82,7 +185,7 @@
     </div>
     <div class="group">
       <label>from <input type="date" id="from"></label>
-      <label>to <input type="date" id="to"></label>
+      <label>to <input type="date" id="to"><span class="clerk" title="Custom-range clerk on duty"></span></label>
     </div>
     <div class="group" id="tools">
       <button class="tool on" data-tool="claude">claude</button>
@@ -102,22 +205,22 @@
       </select></label>
     </div>
     <div class="group">
-      <label><input type="checkbox" id="sub" checked> Include subagents</label>
+      <label><input type="checkbox" id="sub" checked> Include subagents <span id="subbaby" title="Baby handles subagent records — ghosts when excluded"></span></label>
     </div>
   </div>
   <div id="kpis"></div>
   <div class="charts">
-    <div class="chart-box"><h3>Tokens over time</h3><canvas id="c-tokens"></canvas></div>
-    <div class="chart-box"><h3>Cost over time</h3><canvas id="c-cost"></canvas></div>
-    <div class="chart-box"><h3>Token mix by tool</h3><canvas id="c-mix"></canvas></div>
-    <div class="chart-box"><h3 id="group-title">Top models</h3><canvas id="c-models"></canvas></div>
-    <div class="chart-box"><h3>Top cost by model</h3><canvas id="c-costmodels"></canvas></div>
-    <div class="chart-box"><h3>Spend month-to-date</h3><canvas id="c-mtd"></canvas></div>
-    <div class="chart-box"><h3>Cache hit rate trend</h3><canvas id="c-hit"></canvas></div>
-    <div class="chart-box"><h3>Most expensive sessions</h3><div id="topsess"></div></div>
+    <div class="chart-box" data-sec="tokens"><h3>Tokens over time <button id="logt" title="Toggle log scale">log</button> <button id="prevt" title="Toggle previous-period overlay">prev</button></h3><canvas id="c-tokens"></canvas></div>
+    <div class="chart-box" data-sec="cost"><h3>Cost over time <button id="logc" title="Toggle log scale">log</button> <button id="prevc" title="Toggle previous-period overlay">prev</button></h3><canvas id="c-cost"></canvas></div>
+    <div class="chart-box" data-sec="mix"><h3>Token mix by tool <button id="mixpct" title="Toggle absolute / percent stacked">%</button></h3><canvas id="c-mix"></canvas></div>
+    <div class="chart-box" data-sec="models"><h3 id="group-title">Top models</h3><canvas id="c-models"></canvas></div>
+    <div class="chart-box" data-sec="costmodels"><h3>Top cost by model</h3><canvas id="c-costmodels"></canvas></div>
+    <div class="chart-box" data-sec="mtd"><h3>Spend month-to-date <span id="mtdglass"></span></h3><canvas id="c-mtd"></canvas></div>
+    <div class="chart-box" data-sec="hit"><h3>Cache hit rate trend</h3><canvas id="c-hit"></canvas></div>
+    <div class="chart-box" data-sec="topsess"><h3>Most expensive sessions</h3><div id="topsess"></div></div>
   </div>
-  <div class="chart-box" style="margin-bottom:14px"><h3>Activity heatmap — trailing 28d (day × hour) <select id="metric" style="font-size:0.8rem;font-weight:normal"><option value="tokens">tokens</option><option value="active">active</option><option value="cost">cost</option></select></h3><div id="heatwrap"><div id="heatmap"></div><div id="rhythm"></div></div></div>
-  <div class="chart-box"><h3>Sessions</h3>
+  <div class="chart-box" data-sec="heat" style="margin-bottom:14px"><h3>Activity heatmap — trailing 28d (day × hour) <select id="metric" style="font-size:0.8rem;font-weight:normal"><option value="tokens">tokens</option><option value="active">active</option><option value="cost">cost</option></select></h3><div id="heatwrap"><div id="heatmap"></div><div id="rhythm"></div></div></div>
+  <div class="chart-box" data-sec="sessions"><h3>Sessions</h3>
     <table id="sessions"><thead><tr></tr></thead><tbody></tbody></table>
     <button id="more" style="margin-top:8px">show more</button>
   </div>
@@ -126,20 +229,38 @@
 const COLORS = { claude: "#D97757", codex: "#10A37F", opencode: "#6E56CF" };
 const TOOLS = ["claude", "codex", "opencode"];
 
+// String pool: session/title/project/model/workspace/tool repeat across
+// ~43k records but only ~1k distinct values. Sharing one reference each
+// instead of a heap string per record saves tens of MB.
+const STRPOOL = new Map();
+function intern(s) {
+  if (typeof s !== "string") return s;
+  const hit = STRPOOL.get(s);
+  if (hit !== undefined) return hit;
+  STRPOOL.set(s, s);
+  return s;
+}
+
 function expand() {
   const { fields, rows } = window.USAGE;
-  return rows.map((r) => {
+  const out = rows.map((r) => {
     const o = {};
     fields.forEach((f, i) => (o[f] = r[i]));
+    for (const f of ["tool", "session", "title", "project", "model", "workspace"]) {
+      if (typeof o[f] === "string") o[f] = intern(o[f]);
+    }
     o.workspace ??= o.project ?? "unknown";
     o.active ??= (o.input || 0) + (o.output || 0) + (o.tool === "opencode" ? o.reasoning || 0 : 0);
     o.estimated ??= 0;
     return o;
   });
+  window.USAGE.rows = null; // ALL is now the single copy; free the raw arrays
+  return out;
 }
 
 function fmt(n) {
   if (n == null) return "—";
+  if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(2).replace(/\.?0+$/, "") + "B";
   if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1) + "M";
   if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(n >= 1e5 ? 0 : 1).replace(/\.0$/, "") + "k";
   return String(Math.round(n * 10) / 10);
@@ -163,6 +284,13 @@ const state = {
   project: "",
   group: "model",
   metric: "tokens",
+  mixPct: false,
+  logT: false,
+  logC: false,
+  prevT: true,
+  prevC: true,
+  gnomes: true,
+  collapsed: [],
   includeSub: true,
   sortKey: "total",
   sortDir: -1,
@@ -173,11 +301,19 @@ const LS_KEY = "usage-state-v1";
 function saveState() {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify({
+      updatedAt: Date.now(),
       preset: state.preset,
       tools: [...state.tools],
       project: state.project,
       group: state.group,
       metric: state.metric,
+      mixPct: state.mixPct,
+      logT: state.logT,
+      logC: state.logC,
+      prevT: state.prevT,
+      prevC: state.prevC,
+      gnomes: state.gnomes,
+      collapsed: state.collapsed,
       includeSub: state.includeSub,
       sortKey: state.sortKey,
       sortDir: state.sortDir,
@@ -185,21 +321,66 @@ function saveState() {
       to: document.getElementById("to")?.value || "",
     }));
   } catch { /* private mode */ }
+  pushPrefs();
+}
+// Local copy is instant; the server copy follows (debounced) so settings
+// survive restarts, port changes and other browsers. No location = no server.
+let prefsTimer = 0;
+function pushPrefs() {
+  try {
+    if (typeof location === "undefined" || location.protocol !== "http:") return;
+    clearTimeout(prefsTimer);
+    prefsTimer = setTimeout(() => {
+      try {
+        const body = localStorage.getItem(LS_KEY) || "{}";
+        fetch("/api/prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body }).catch(() => {});
+      } catch { /* offline */ }
+    }, 500);
+  } catch { /* ignore */ }
+}
+// Server copy wins when newer (last write across any browser/port).
+async function pullPrefs() {
+  try {
+    if (typeof location === "undefined" || location.protocol !== "http:") return;
+    const res = await fetch("/api/prefs", { cache: "no-store" });
+    if (!res.ok) return;
+    const p = await res.json();
+    let local = null;
+    try { local = JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch { /* ignore */ }
+    if (p && typeof p === "object" && (p.updatedAt || 0) > ((local && local.updatedAt) || 0)) {
+      if (applyPrefs(p)) {
+        try { localStorage.setItem(LS_KEY, JSON.stringify(p)); } catch { /* ignore */ }
+        syncControls();
+        rerender();
+      }
+    }
+  } catch { /* offline: local copy stands */ }
 }
 function loadState() {
   let s = null;
   try { s = JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch { s = null; }
-  if (!s || typeof s !== "object") return;
+  applyPrefs(s);
+}
+function applyPrefs(s) {
+  if (!s || typeof s !== "object") return false;
   if (typeof s.preset === "string") state.preset = s.preset;
   if (Array.isArray(s.tools) && s.tools.length) state.tools = new Set(s.tools.filter((t) => TOOLS.includes(t)));
   if (typeof s.project === "string") state.project = s.project;
   if (typeof s.group === "string") state.group = s.group;
   if (typeof s.metric === "string" && ["tokens", "active", "cost"].includes(s.metric)) state.metric = s.metric;
+  if (typeof s.mixPct === "boolean") state.mixPct = s.mixPct;
+  if (typeof s.logT === "boolean") state.logT = s.logT;
+  if (typeof s.logC === "boolean") state.logC = s.logC;
+  if (typeof s.prevT === "boolean") state.prevT = s.prevT;
+  if (typeof s.prevC === "boolean") state.prevC = s.prevC;
+  if (typeof s.gnomes === "boolean") state.gnomes = s.gnomes;
+  if (Array.isArray(s.collapsed)) state.collapsed = s.collapsed.filter((x) => typeof x === "string");
   if (typeof s.includeSub === "boolean") state.includeSub = s.includeSub;
   if (typeof s.sortKey === "string") state.sortKey = s.sortKey;
   if (s.sortDir === 1 || s.sortDir === -1) state.sortDir = s.sortDir;
   state._from = s.from || "";
   state._to = s.to || "";
+  return true;
 }
 
 const THEME_KEY = "usage-theme";
@@ -256,12 +437,10 @@ function refreshProjects() {
   }
   sel.value = state.project;
 }
-function init() {
-  loadState();
-  setMeta();
+// Push every control widget to match state (boot + server-prefs arrival).
+function syncControls() {
   refreshProjects();
-  const sel = document.getElementById("project");
-  sel.value = state.project || "";
+  document.getElementById("project").value = state.project || "";
   if (state._from) document.getElementById("from").value = state._from;
   if (state._to) document.getElementById("to").value = state._to;
   document.querySelectorAll("#presets button").forEach((b) =>
@@ -271,6 +450,14 @@ function init() {
   document.getElementById("sub").checked = state.includeSub;
   const gsel = document.getElementById("group");
   if (gsel) gsel.value = state.group;
+  const msel = document.getElementById("metric");
+  if (msel) msel.value = state.metric;
+}
+
+function init() {
+  loadState();
+  setMeta();
+  syncControls();
   document.querySelectorAll("#presets button").forEach((b) =>
     b.addEventListener("click", () => {
       document.querySelectorAll("#presets button").forEach((x) => x.classList.remove("active"));
@@ -291,15 +478,31 @@ function init() {
       saveState(); render();
     })
   );
-  sel.addEventListener("change", () => { state.project = sel.value; state.shown = 50; saveState(); render(); });
+  document.getElementById("project").addEventListener("change", (e) => { state.project = e.target.value; state.shown = 50; saveState(); render(); });
   document.getElementById("group").addEventListener("change", (e) => {
     state.group = e.target.value; saveState(); render();
   });
   const msel = document.getElementById("metric");
   if (msel) {
-    msel.value = state.metric;
     msel.addEventListener("change", (e) => {
       state.metric = e.target.value; saveState(); render();
+    });
+  }
+  document.getElementById("mixpct").addEventListener("click", () => {
+    state.mixPct = !state.mixPct; saveState(); render();
+  });
+  for (const [id, key] of [["logt", "logT"], ["logc", "logC"], ["prevt", "prevT"], ["prevc", "prevC"]]) {
+    document.getElementById(id).addEventListener("click", () => {
+      state[key] = !state[key]; saveState(); render();
+    });
+  }
+  const gbtn = document.getElementById("gnomes");
+  if (gbtn) {
+    gbtn.textContent = "gnomes: " + (state.gnomes ? "on" : "off");
+    gbtn.addEventListener("click", () => {
+      state.gnomes = !state.gnomes; saveState();
+      gbtn.textContent = "gnomes: " + (state.gnomes ? "on" : "off");
+      render();
     });
   }
   document.getElementById("sub").addEventListener("change", (e) => {
@@ -317,8 +520,34 @@ function init() {
   document.getElementById("from").addEventListener("change", custom);
   document.getElementById("to").addEventListener("change", custom);
   document.getElementById("more").addEventListener("click", () => { state.shown += 50; render(); });
+  document.getElementById("subbaby").innerHTML = gnomeHead("#10A37F");
+  document.querySelectorAll(".clerk").forEach((el) => { el.innerHTML = clerkSVG(); });
+  const shut = new Set(state.collapsed);
+  document.querySelectorAll(".chart-box[data-sec]").forEach((box) => {
+    const key = box.dataset.sec;
+    const h3 = box.querySelector("h3");
+    if (!h3) return;
+    const btn = document.createElement("button");
+    btn.className = "fold";
+    btn.title = "Collapse/expand section";
+    const sync = () => {
+      btn.textContent = shut.has(key) ? "▸" : "▾";
+      box.classList.toggle("shut", shut.has(key));
+    };
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (shut.has(key)) shut.delete(key); else shut.add(key);
+      state.collapsed = [...shut]; saveState(); sync();
+    });
+    h3.prepend(btn);
+    sync();
+  });
+  document.addEventListener("visibilitychange", () => {
+    document.body.classList.toggle("napping", document.hidden);
+  });
   initTheme();
   render();
+  pullPrefs(); // server copy wins if newer (other browser/port wrote last)
 }
 
 function range() {
@@ -326,6 +555,7 @@ function range() {
   const day = 86400000;
   switch (state.preset) {
     case "1h": return [now - 3600000, now];
+    case "3h": return [now - 3 * 3600000, now];
     case "6h": return [now - 6 * 3600000, now];
     case "today": { const d = new Date(); d.setHours(0, 0, 0, 0); return [d.getTime(), now]; }
     case "7d": return [now - 7 * day, now];
@@ -397,7 +627,7 @@ function burnStats() {
 function delta(cur, prev, pol = "neg") {
   if (prev === 0) return cur === 0 ? ["—", "flat"] : ["▲ new", pol === "pos" ? "down" : pol === "flat" ? "flat" : "up"];
   const pct = ((cur - prev) / Math.abs(prev)) * 100;
-  if (Math.abs(pct) < 0.05) return ["0%", "flat"];
+  if (Math.abs(pct) < 0.5) return ["0%", "flat"]; // rounds to zero: no direction
   const arrow = pct > 0 ? "▲ " : "▼ ";
   if (pol === "flat") {
     if (pct > 999) return [arrow + "×" + mult(cur / prev), "flat"];
@@ -469,23 +699,32 @@ function bucketLabel(ts, from, to) {
 
 function render() {
   const [from, to] = range();
+  document.body.classList.toggle("custom-range", state.preset === "custom");
+  document.body.classList.toggle("nognomes", !state.gnomes);
   const recs = filtered(from, to);
   // Intraday presets compare against the same clock window yesterday;
   // comparing against the dead overnight hours is pure noise.
+  const [pfrom, pto] = prevRange(from, to);
+  const prev = filtered(pfrom, pto);
   const day = 86400000;
-  const prev = (state.preset === "1h" || state.preset === "6h" || state.preset === "today")
-    ? filtered(from - day, to - day)
-    : filtered(from - (to - from), from - 1);
-  renderKpis(recs, prev);
-  renderTimeCharts(recs, from, to);
+  renderKpis(recs, prev, from, to);
+  renderTimeCharts(recs, from, to, bucketize(prev, pfrom, pto));
   renderMix(recs);
   renderModels(recs);
   renderCostModels(recs);
   renderMtd();
   renderHitTrend(recs, from, to);
   renderCostSessions(recs);
+  renderCrew(recs, from, to);
   renderHeat(filtered(Date.now() - 28 * day, Date.now())); // heatmap always trailing 28d
   renderTable(recs);
+}
+
+function prevRange(from, to) {
+  const day = 86400000;
+  return (state.preset === "1h" || state.preset === "3h" || state.preset === "6h" || state.preset === "today")
+    ? [from - day, to - day]
+    : [from - (to - from), from - 1];
 }
 
 function costPerMillionActive(a) {
@@ -497,57 +736,163 @@ function zeroNeutral(cur, prev) {
   return cur === 0 ? ["—", "flat"] : delta(cur, prev, "neg");
 }
 
-function renderKpis(recs, prev) {
+function renderKpis(recs, prev, from = 0, to = 1) {
   const a = kpis(recs), b = kpis(prev);
   const burn = burnStats();
+  // 7-slice sparklines: one pass buckets records, each tile reduces its own metric.
+  const NSL = 7;
+  const slices = Array.from({ length: NSL }, () => []);
+  const wspan = Math.max(to - from, 1);
+  for (const r of recs) {
+    slices[Math.min(NSL - 1, Math.floor((r.ts - from) / wspan * NSL))].push(r);
+  }
+  const ssum = (f) => slices.map((s) => s.reduce((x, r) => x + f(r), 0));
+  const sact = (r) => r.active ?? (r.input + r.output);
+  const spTotal = ssum(totalOf), spActive = ssum(sact);
+  const spIn = ssum((r) => r.input), spRead = ssum((r) => r.cacheRead);
+  const spWrite = ssum((r) => r.cacheWrite), spOut = ssum((r) => r.output);
+  const spCost = ssum((r) => r.cost || 0);
+  const spHit = slices.map((s) => {
+    const d = s.reduce((x, r) => x + r.input + r.cacheRead + r.cacheWrite, 0);
+    return d ? s.reduce((x, r) => x + r.cacheRead, 0) / d * 100 : 0;
+  });
+  const spCov = slices.map((s) => {
+    const t = s.reduce((x, r) => x + totalOf(r), 0);
+    return t ? s.reduce((x, r) => x + (r.cost != null ? totalOf(r) : 0), 0) / t * 100 : 0;
+  });
+  const spSess = slices.map((s) => new Set(s.map((r) => r.tool + ":" + r.session)).size);
+  const spAvg = slices.map((s, i) => (spSess[i] ? s.reduce((x, r) => x + sact(r), 0) / spSess[i] : 0));
+  const spark = (vals, cls) => {
+    const mx = Math.max(...vals), mn = Math.min(...vals);
+    const pts = vals.map((v, i) => `${(i * 56 / (NSL - 1)).toFixed(1)},${(17 - (mx > mn ? (v - mn) / (mx - mn) * 15 : 7.5)).toFixed(1)}`).join(" ");
+    const col = cls === "up" ? "var(--up)" : cls === "down" ? "var(--down)" : "var(--muted)";
+    return `<svg class="spark" viewBox="0 0 56 18" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5"/></svg>`;
+  };
+  // Tile mascots: wheel speed follows burn pace, stamp audits coverage,
+  // barbell scales with avg session size, receptionist greets new sessions.
+  const ratio = burn.base > 0 ? burn.projected / burn.base : 0;
+  const wspd = Math.min(1.2, Math.max(0.25, 1.2 - Math.log10(1 + ratio) * 0.4)).toFixed(2) + "s";
+  const wheel = `<span class="wheel${ratio > 2 ? " pant" : ""}" style="--wspd:${wspd}" title="Burning ×${burn.base > 0 ? mult(ratio) : "—"} of 30d pace${ratio > 2 ? " — panting!" : ""}"><span class="rim"></span><span class="ham">${gnomeHead("#6E56CF")}</span><span class="sweat"></span></span>`;
+  const audit = a.coverage < 1;
+  const acct = `<span class="acct${audit ? " audit" : ""}" title="${audit ? fmt(a.unpriced) + " tokens await pricing" : "Fully priced"}"><span class="stmp">${audit ? "?" : "✓"}</span>${gnomeHead("#10A37F")}</span>`;
+  const barW = Math.round(Math.min(28, Math.max(14, 14 + Math.log10(1 + a.avgActive) * 8)));
+  const lift = `<span class="lift" title="Barbell scales with avg active/session">${gnomeHead("#D97757")}<span class="bar" style="width:${barW}px"><i></i><i></i></span></span>`;
+  const grew = lastSessN > 0 && a.sessions > lastSessN;
+  const recep = `<span class="recep" title="${grew ? "+" + (a.sessions - lastSessN) + " sessions since last tick" : a.sessions + " sessions in window"}">${gnomeHead("#6E56CF")}<span class="wave"></span>${grew ? `<span class="guest">${gnomeHead("#10A37F")}</span>` : ""}</span>`;
+  lastSessN = a.sessions;
+  // Merchant faints when the priciest model costs 100x+ the cheapest per active token.
+  const byModel = new Map();
+  for (const r of recs) {
+    if (r.cost == null) continue;
+    const m = byModel.get(r.model) || { cost: 0, active: 0 };
+    m.cost += r.cost;
+    m.active += r.active ?? (r.input + r.output);
+    byModel.set(r.model, m);
+  }
+  let cheap = null, dear = null;
+  for (const [m, v] of byModel) {
+    if (v.active <= 0 || v.cost <= 0) continue;
+    const u = v.cost / v.active;
+    if (!cheap || u < cheap.u) cheap = { m, u };
+    if (!dear || u > dear.u) dear = { m, u };
+  }
+  const gap = cheap && dear && cheap.u > 0 ? dear.u / cheap.u : 0;
+  const merchTitle = cheap && dear
+    ? `${String(dear.m).slice(0, 24)} ${money(dear.u * 1e6)}/1M vs ${String(cheap.m).slice(0, 24)} ${money(cheap.u * 1e6)}/1M (×${mult(gap)})`
+    : "No priced models in window";
+  const merch = `<span class="merch${gap > 100 ? " faint" : ""}" title="${merchTitle.replace(/"/g, "&quot;")}">${gnomeHead("#e0a100")}<span class="tag">$</span></span>`;
+  const full = a.cacheWrite > 0;
+  const bucket = `<span class="bucket${full ? " full" : ""}" title="${full ? fmt(a.cacheWrite) + " cache writes hauled" : "No cache writes — nothing to carry"}">${bucketSVG(full)}</span>`;
   const tiles = [
-    ["Total tokens", fmt(a.total), delta(a.total, b.total, "neg")],
-    ["Active tokens", fmt(a.active), delta(a.active, b.active, "neg")],
-    ["Burn rate", fmt(burn.projected) + " proj", delta(burn.projected, burn.base, "neg"), "today pace vs 30d avg"],
-    ["Fresh input", fmt(a.input), delta(a.input, b.input, "neg")],
-    ["Cache read", fmt(a.cacheRead), delta(a.cacheRead, b.cacheRead, "neg")],
-    ["Cache write", fmt(a.cacheWrite), zeroNeutral(a.cacheWrite, b.cacheWrite)],
-    ["Output", fmt(a.output), delta(a.output, b.output, "neg")],
-    ["Cache hit rate", (a.hit * 100).toFixed(1) + "%", delta(a.hit, b.hit, "pos")],
-    ["Est. cost", money(a.cost), delta(a.cost, b.cost, "neg"), costPerMillionActive(a)],
-    ["Cost coverage", (a.coverage * 100).toFixed(1) + "%", delta(a.coverage, b.coverage, "pos"), a.unpriced ? fmt(a.unpriced) + " unpriced" : ""],
-    ["Sessions", String(a.sessions), delta(a.sessions, b.sessions, "flat")],
-    ["Avg active/session", fmt(a.avgActive), delta(a.avgActive, b.avgActive, "flat")],
+    ["Total tokens", fmt(a.total), delta(a.total, b.total, "neg"), "", "", wrestle(a.total, b.total), spark(spTotal, delta(a.total, b.total, "neg")[1])],
+    ["Active tokens", fmt(a.active), delta(a.active, b.active, "neg"), "", "", wrestle(a.active, b.active), spark(spActive, delta(a.active, b.active, "neg")[1])],
+    ["Burn rate", fmt(burn.projected) + " proj", delta(burn.projected, burn.base, "neg"), "today pace vs 30d avg", wheel, wrestle(burn.projected, burn.base), spark(spActive, delta(burn.projected, burn.base, "neg")[1])],
+    ["Fresh input", fmt(a.input), delta(a.input, b.input, "neg"), "", "", wrestle(a.input, b.input), spark(spIn, delta(a.input, b.input, "neg")[1])],
+    ["Cache read", fmt(a.cacheRead), delta(a.cacheRead, b.cacheRead, "neg"), "", "", wrestle(a.cacheRead, b.cacheRead), spark(spRead, delta(a.cacheRead, b.cacheRead, "neg")[1])],
+    ["Cache write", fmt(a.cacheWrite), zeroNeutral(a.cacheWrite, b.cacheWrite), "", bucket, "", spark(spWrite, zeroNeutral(a.cacheWrite, b.cacheWrite)[1])],
+    ["Output", fmt(a.output), delta(a.output, b.output, "neg"), "", "", wrestle(a.output, b.output), spark(spOut, delta(a.output, b.output, "neg")[1])],
+    ["Cache hit rate", (a.hit * 100).toFixed(1) + "%", delta(a.hit, b.hit, "pos"), "", "", "", spark(spHit, delta(a.hit, b.hit, "pos")[1])],
+    ["Est. cost", money(a.cost), delta(a.cost, b.cost, "neg"), costPerMillionActive(a), merch, wrestle(a.cost, b.cost), spark(spCost, delta(a.cost, b.cost, "neg")[1])],
+    ["Cost coverage", (a.coverage * 100).toFixed(1) + "%", delta(a.coverage, b.coverage, "pos"), a.unpriced ? fmt(a.unpriced) + " unpriced" : "", acct, "", spark(spCov, delta(a.coverage, b.coverage, "pos")[1])],
+    ["Sessions", String(a.sessions), delta(a.sessions, b.sessions, "flat"), "", recep, wrestle(a.sessions, b.sessions), spark(spSess, "flat")],
+    ["Avg active", fmt(a.avgActive), delta(a.avgActive, b.avgActive, "flat"), "", lift, wrestle(a.avgActive, b.avgActive), spark(spAvg, "flat")],
   ];
   document.getElementById("kpis").innerHTML = tiles
-    .map(([n, v, [d, c], sub]) => `<div class="kpi"><div class="name">${n}</div><div class="val">${v}</div><div class="delta ${c}">${d}</div>${sub ? `<div class="delta flat" title="Unit cost on real work (cache excluded)">${sub}</div>` : ""}</div>`)
+    .map(([n, v, [d, c], sub, masc, w, sp]) => `<div class="kpi"><div class="name"><span class="nametext" title="${n}">${n}</span>${masc ? `<span class="mascot">${masc}</span>` : ""}</div><div class="val">${v}</div>${sp || ""}<div class="delta ${c}">${d}${w || ""}</div>${sub ? `<div class="delta flat" title="Unit cost on real work (cache excluded)">${sub}</div>` : ""}</div>`)
     .join("");
 }
 
-function renderTimeCharts(recs, from, to) {
+function renderTimeCharts(recs, from, to, prevBuckets = []) {
   const buckets = bucketize(recs, from, to);
   const labels = buckets.map((b) => bucketLabel(b.ts, from, to));
   const live = TOOLS.filter((t) => buckets.some((b) => b[t] > 0 || b.cost[t] > 0));
   const shown = live.length ? live : TOOLS;
+  // Dashed previous-period overlay, bucket-aligned (equal spans => equal counts).
+  const prevT = prevBuckets.map((b) => b.claude + b.codex + b.opencode);
+  const prevC = prevBuckets.map((b) => Math.round((b.cost.claude + b.cost.codex + b.cost.opencode) * 100) / 100);
+  const hasPrev = prevT.some((v) => v > 0) || prevC.some((v) => v > 0);
+  const showPT = state.prevT !== false && hasPrev; // undefined (old saves) = on
+  const showPC = state.prevC !== false && hasPrev;
+  const prevLine = (data, color, gaps) => ({
+    type: "line", label: "prev period", data, pointStyle: "line",
+    borderColor: color, borderDash: [5, 4], pointRadius: 0, tension: 0.3,
+    ...(gaps ? { spanGaps: true } : {}),
+  });
+  const legendLine = { labels: { usePointStyle: true } }; // boxes -> rects, prev -> short dotted line
+  // Log mode: orders of magnitude stay readable together (yesterday's $6
+  // spike no longer flattens today's $0.05 line). Stacking off on log —
+  // stacked sums misbehave on logarithmic axes. Zeros become nulls so lines
+  // bridge dead buckets instead of punching dotted gaps; ticks label powers only.
+  const logTick = (prefix, f) => (v) => {
+    if (!(v > 0)) return "";
+    const l = Math.log10(v);
+    return Math.abs(l - Math.round(l)) < 1e-9 ? prefix + f(v) : "";
+  };
+  document.getElementById("logt").classList.toggle("active", !!state.logT);
+  document.getElementById("logc").classList.toggle("active", !!state.logC);
+  document.getElementById("prevt").classList.toggle("active", state.prevT !== false);
+  document.getElementById("prevc").classList.toggle("active", state.prevC !== false);
   // The trailing bucket is still accumulating when the range ends at now.
   const partial = buckets.length > 1 && to >= Date.now() - 60000;
   const last = buckets.length - 1;
   const barColor = (t) => buckets.map((_, i) => (partial && i === last ? hexA(COLORS[t], 0.45) : COLORS[t]));
-  const progressFooter = (items) =>
-    partial && items.length && items[0].dataIndex === last ? "current period in progress" : "";
+  const progressFooter = (asMoney) => (items) => {
+    if (!items.length) return "";
+    const i = items[0].dataIndex;
+    const tot = buckets[i].claude + buckets[i].codex + buckets[i].opencode;
+    const ctot = buckets[i].cost.claude + buckets[i].cost.codex + buckets[i].cost.opencode;
+    const lines = [asMoney ? `total ${money(ctot)} · ${fmt(tot)} tokens` : `total ${fmt(tot)} · ${money(ctot)}`];
+    if (partial && i === last) lines.push("current period in progress");
+    return lines;
+  };
   makeChart("c-tokens", {
     type: "bar",
     data: {
       labels,
-      datasets: shown.map((t) => ({ label: t, data: buckets.map((b) => b[t]), backgroundColor: barColor(t) })),
+      datasets: [
+        ...shown.map((t) => ({ label: t, data: buckets.map((b) => b[t]), backgroundColor: barColor(t), pointStyle: "rect" })),
+        ...(showPT ? [prevLine(state.logT ? prevT.map((v) => (v === 0 ? null : v)) : prevT, "#9a9aa3", state.logT)] : []),
+      ],
     },
-    options: { responsive: true, plugins: { tooltip: { callbacks: { footer: progressFooter } } }, scales: { x: { stacked: true, ticks: { maxTicksLimit: 12 } }, y: { stacked: true, ticks: { callback: fmt } } } },
+    options: { responsive: true, plugins: { tooltip: { callbacks: { footer: progressFooter(false) } }, legend: legendLine }, scales: { x: { stacked: !state.logT, ticks: { maxTicksLimit: 12 } }, y: { stacked: !state.logT, type: state.logT ? "logarithmic" : "linear", ticks: { callback: state.logT ? logTick("", fmt) : fmt } } } },
   });
   makeChart("c-cost", {
     type: "line",
     data: {
       labels,
-      datasets: shown.map((t) => ({
-        label: t, data: buckets.map((b) => Math.round(b.cost[t] * 100) / 100),
-        borderColor: COLORS[t], backgroundColor: COLORS[t], tension: 0.3, cubicInterpolationMode: "monotone",
-      })),
+      datasets: [
+        ...shown.map((t) => ({
+          label: t, data: buckets.map((b) => {
+            const v = Math.round(b.cost[t] * 100) / 100;
+            return state.logC && v === 0 ? null : v;
+          }), pointStyle: "rect",
+          borderColor: COLORS[t], backgroundColor: COLORS[t], tension: 0.3, cubicInterpolationMode: "monotone",
+          ...(state.logC ? { spanGaps: true } : {}),
+        })),
+        ...(showPC ? [prevLine(state.logC ? prevC.map((v) => (v === 0 ? null : v)) : prevC, "#9a9aa3", state.logC)] : []),
+      ],
     },
-    options: { responsive: true, plugins: { tooltip: { callbacks: { footer: progressFooter } } }, scales: { x: { ticks: { maxTicksLimit: 12 } }, y: { ticks: { callback: (v) => "$" + v } } } },
+    options: { responsive: true, plugins: { tooltip: { callbacks: { footer: progressFooter(true) } }, legend: legendLine }, scales: { x: { ticks: { maxTicksLimit: 12 } }, y: { type: state.logC ? "logarithmic" : "linear", ticks: { callback: state.logC ? logTick("$", (v) => v) : (v) => "$" + v } } } },
   });
 }
 
@@ -565,13 +910,29 @@ function renderMix(recs) {
   const parts = [
     ["input", "#8888cc"], ["cacheRead", "#4caf7d"], ["cacheWrite", "#e0a100"], ["output", "#d97757"],
   ];
+  const totals = Object.fromEntries(shown.map((t) => [t, agg[t].input + agg[t].cacheRead + agg[t].cacheWrite + agg[t].output]));
+  const valOf = (t, k) => (state.mixPct && totals[t] ? agg[t][k] / totals[t] * 100 : agg[t][k]);
+  document.getElementById("mixpct").classList.toggle("active", state.mixPct);
   makeChart("c-mix", {
     type: "bar",
     data: {
       labels: shown,
-      datasets: parts.map(([k, c]) => ({ label: k, data: shown.map((t) => agg[t][k]), backgroundColor: c })),
+      datasets: parts.map(([k, c]) => ({ label: k, data: shown.map((t) => Math.round(valOf(t, k) * 10) / 10), backgroundColor: c })),
     },
-    options: { indexAxis: "y", responsive: true, scales: { x: { stacked: true, ticks: { callback: fmt } }, y: { stacked: true } } },
+    options: {
+      indexAxis: "y", responsive: true,
+      plugins: {
+        tooltip: {
+          callbacks: state.mixPct
+            ? { label: (ctx) => ` ${ctx.dataset.label}: ${ctx.parsed.x.toFixed(1)}% (${fmt(agg[ctx.label][ctx.dataset.label])})` }
+            : {},
+        },
+      },
+      scales: {
+        x: { stacked: true, min: state.mixPct ? 0 : undefined, max: state.mixPct ? 100 : undefined, ticks: { callback: state.mixPct ? (v) => v + "%" : fmt } },
+        y: { stacked: true },
+      },
+    },
   });
 }
 
@@ -594,13 +955,21 @@ function renderModels(recs) {
   const titles = { model: "Top models", project: "Top projects", workspace: "Top workspaces", "tool+model": "Top tool+model", "workspace+model": "Top workspace+model" };
   document.getElementById("group-title").textContent = titles[state.group] || "Top models";
   const top = Object.entries(agg).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const sum = top.reduce((x, [, v]) => x + v, 0);
+  const cm = document.getElementById("c-models");
+  if (cm && state.group === "model" && top.length) {
+    cm.title = `Crowned: ${top[0][0]} at ${fmt(top[0][1])} (${(top[0][1] / (sum || 1) * 100).toFixed(0)}% of window)`;
+  } else if (cm) {
+    cm.title = "";
+  }
   makeChart("c-models", {
     type: "bar",
     data: {
       labels: top.map(([m]) => m),
       datasets: [{ data: top.map(([, v]) => v), backgroundColor: "#6E56CF" }],
     },
-    options: { indexAxis: "y", responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { callback: fmt } } } },
+    options: { indexAxis: "y", responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { callback: fmt, maxTicksLimit: 8 } } } },
+    plugins: [climberPlugin],
   });
 }
 
@@ -614,6 +983,14 @@ function renderMtd() {
   const start = new Date();
   start.setDate(1);
   start.setHours(0, 0, 0, 0);
+  const dim = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
+  const glass = document.getElementById("mtdglass");
+  if (glass) {
+    const frac = Math.min(1, (now - start.getTime()) / (dim * 86400000));
+    const day = Math.min(dim, Math.floor((now - start.getTime()) / 86400000) + 1);
+    glass.innerHTML = glassSVG(frac);
+    glass.title = `Day ${day} of ${dim} — sand is the month elapsed`;
+  }
   const recs = filtered(start.getTime(), now);
   const perDay = new Map();
   for (const r of recs) {
@@ -633,33 +1010,40 @@ function renderMtd() {
   makeChart("c-mtd", {
     type: "line",
     data: { labels, datasets: [{ label: "cumulative cost", data, borderColor: "#e0a100", backgroundColor: "#e0a100", tension: 0.2, fill: true }] },
-    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: (v) => "$" + v } } } },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 12 } }, y: { ticks: { callback: (v) => "$" + v } } } },
   });
 }
 
 function renderHitTrend(recs, from, to) {
-  const perDay = new Map();
+  // Intraday windows bucket hourly (a single daily dot says nothing);
+  // longer windows stay daily.
+  const hourly = to - from <= 2 * 86400000;
+  const step = hourly ? 3600000 : 86400000;
+  const keyOf = hourly ? (ts) => Math.floor(ts / 3600000) * 3600000 : dayKey;
+  const per = new Map();
   const blank = () => ({ input: 0, cacheRead: 0, cacheWrite: 0 });
   if (Number.isFinite(from) && Number.isFinite(to) && to > from) {
-    for (let t = dayKey(from); t <= to; t += 86400000) perDay.set(t, blank());
+    for (let t = keyOf(from); t <= to; t += step) per.set(t, blank());
   }
   for (const r of recs) {
-    const k = dayKey(r.ts);
-    if (!perDay.has(k)) perDay.set(k, blank());
-    const b = perDay.get(k);
+    const k = keyOf(r.ts);
+    if (!per.has(k)) per.set(k, blank());
+    const b = per.get(k);
     b.input += r.input; b.cacheRead += r.cacheRead; b.cacheWrite += r.cacheWrite;
   }
-  const keys = [...perDay.keys()].sort((x, y) => x - y);
-  const labels = keys.map((t) => new Date(t).toLocaleDateString([], { month: "numeric", day: "numeric" }));
+  const keys = [...per.keys()].sort((x, y) => x - y);
+  const labels = keys.map((t) => hourly
+    ? new Date(t).toLocaleTimeString([], { hour: "numeric" })
+    : new Date(t).toLocaleDateString([], { month: "numeric", day: "numeric" }));
   const data = keys.map((t) => {
-    const b = perDay.get(t);
+    const b = per.get(t);
     const denom = b.input + b.cacheRead + b.cacheWrite;
     return denom ? Math.round(b.cacheRead / denom * 1000) / 10 : null;
   });
   makeChart("c-hit", {
     type: "line",
     data: { labels, datasets: [{ label: "hit rate %", data, borderColor: "#4caf7d", backgroundColor: "#4caf7d", tension: 0.2, spanGaps: true }] },
-    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 100, ticks: { callback: (v) => v + "%" } } } },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 12 } }, y: { min: 0, max: 100, ticks: { callback: (v) => v + "%" } } } },
   });
 }
 
@@ -674,9 +1058,15 @@ function renderCostSessions(recs) {
     g.total += totalOf(r);
   }
   const top = [...groups.values()].sort((a, b) => b.cost - a.cost).slice(0, 10);
+  const maxCost = Math.max(0, ...top.map((g) => g.cost));
   document.getElementById("topsess").innerHTML = top.length
-    ? `<table><tbody>${top.map((g) => `<tr><td><span class="dot" style="background:${COLORS[g.tool]}"></span>${g.tool}</td><td title="${String(g.title).replace(/"/g, "&quot;")}">${String(g.title).length > 34 ? String(g.title).slice(0, 34) + "…" : g.title}</td><td class="num">${fmt(g.total)}</td><td class="num">${money(g.cost)}</td></tr>`).join("")}</tbody></table>`
-    : '<div style="color:var(--muted);font-size:0.8rem">No priced sessions in range.</div>';
+    ? `<table><tbody>${top.map((g) => {
+      const share = maxCost > 0 ? g.cost / maxCost : 0;
+      const w = Math.round(9 + 13 * share);
+      const lean = Math.round(share * 12);
+      return `<tr><td><span class="dot" style="background:${COLORS[g.tool]}"></span>${g.tool}</td><td title="${String(g.title).replace(/"/g, "&quot;")}">${String(g.title).length > 34 ? String(g.title).slice(0, 34) + "…" : g.title}</td><td class="num">${fmt(g.total)}</td><td class="num"><span class="porter" style="width:${w}px;transform:rotate(${lean}deg)" title="Porter strains under ${money(g.cost)}">${gnomeHead(COLORS[g.tool])}</span> ${money(g.cost)}</td></tr>`;
+    }).join("")}</tbody></table>`
+    : `<div style="color:var(--muted);font-size:0.8rem">${shrugSVG()}No priced sessions in range.</div>`;
 }
 
 function renderCostModels(recs) {
@@ -686,6 +1076,11 @@ function renderCostModels(recs) {
     agg[r.model] = (agg[r.model] || 0) + r.cost;
   }
   const top = Object.entries(agg).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const csum = top.reduce((x, [, v]) => x + v, 0);
+  const cc = document.getElementById("c-costmodels");
+  if (cc) {
+    cc.title = top.length ? `Crowned: ${top[0][0]} at ${money(top[0][1])} (${(top[0][1] / (csum || 1) * 100).toFixed(0)}% of window cost)` : "";
+  }
   makeChart("c-costmodels", {
     type: "bar",
     data: {
@@ -693,8 +1088,61 @@ function renderCostModels(recs) {
       datasets: [{ data: top.map(([, v]) => Math.round(v * 100) / 100), backgroundColor: "#e0a100" }],
     },
     options: { indexAxis: "y", responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { callback: (v) => "$" + v } } } },
+    plugins: [climberPlugin],
   });
 }
+
+// Canvas gnomes: on the cost chart they climb the bars scaled by value
+// share (leader plants a flag); on the models chart the leader alone wears
+// a crown. Static drawing (no rAF), one paint per chart update.
+const climberPlugin = {
+  id: "climbers",
+  afterDatasetsDraw(chart) {
+    if (typeof state !== "undefined" && state.gnomes === false) return; // crew off = no canvas gnomes
+    const meta = chart.getDatasetMeta(0);
+    if (!meta || !meta.data.length) return;
+    const vals = chart.data.datasets[0].data;
+    const max = Math.max(0, ...vals);
+    const ctx = chart.ctx;
+    if (chart.canvas && chart.canvas.id === "c-models") {
+      const bar = meta.data[0];
+      const s = 7;
+      ctx.save();
+      ctx.translate(bar.x + s * 1.6, bar.y);
+      ctx.fillStyle = "#e0a100";
+      ctx.beginPath();
+      ctx.moveTo(-s, 0); ctx.lineTo(-s, -s); ctx.lineTo(-s / 2, -s / 2);
+      ctx.lineTo(0, -s - 1); ctx.lineTo(s / 2, -s / 2); ctx.lineTo(s, -s); ctx.lineTo(s, 0);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+      return;
+    }
+    meta.data.forEach((bar, i) => {
+      const s = max > 0 ? 5 + 7 * (vals[i] / max) : 5;
+      ctx.save();
+      ctx.translate(bar.x + s * 0.8, bar.y);
+      ctx.fillStyle = "#e0a100";
+      ctx.beginPath();
+      ctx.moveTo(0, -s); ctx.lineTo(-s * 0.55, -s * 0.25); ctx.lineTo(s * 0.55, -s * 0.25);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#f2c9a0";
+      ctx.beginPath(); ctx.arc(0, 0, s * 0.48, 0, 7); ctx.fill();
+      ctx.fillStyle = "#dcdce0";
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.28, s * 0.15); ctx.lineTo(s * 0.28, s * 0.15); ctx.lineTo(0, s * 0.62);
+      ctx.closePath(); ctx.fill();
+      if (i === 0) {
+        ctx.strokeStyle = "#9a9aa3"; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(s * 0.5, -s * 0.2); ctx.lineTo(s * 0.5, -s * 1.2); ctx.stroke();
+        ctx.fillStyle = "#e0a100";
+        ctx.beginPath();
+        ctx.moveTo(s * 0.5, -s * 1.2); ctx.lineTo(s * 1.1, -s * 1.0); ctx.lineTo(s * 0.5, -s * 0.8);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+    });
+  },
+};
 
 function metricVal(r) {
   if (state.metric === "active") return r.active ?? (r.input + r.output);
@@ -703,6 +1151,158 @@ function metricVal(r) {
 }
 function metricFmt(v) {
   return state.metric === "cost" ? money(v) : fmt(v);
+}
+
+// Garden gnome crew: one worker per tool. Bounce + tool-swing speed follows
+// active tokens/sec in the current window (log scale). Zero = sleeping pose.
+// Click a gnome to toggle its tool filter. Gem sack scales with window cost,
+// green cart bar shows the tool's cache hit rate.
+function toggleTool(t) {
+  const b = document.querySelector(`#tools button[data-tool="${t}"]`);
+  if (state.tools.has(t)) { state.tools.delete(t); if (b) b.classList.remove("on"); }
+  else { state.tools.add(t); if (b) b.classList.add("on"); }
+  state.shown = 50; saveState(); render();
+}
+function gnomeSVG(tool) {
+  const hat = COLORS[tool] || "#888";
+  // Tools drawn relative to the hand at (0,0): handle root overlaps the
+  // hand dot so the implement reads as held, not floating.
+  const tools = {
+    claude: '<line x1="0" y1="1" x2="9" y2="-14" stroke="#8a6b4a" stroke-width="3"/><path d="M3 -16 Q9 -21 15 -14" stroke="#9aa0a6" stroke-width="2.5" fill="none"/>',
+    codex: '<line x1="0" y1="1" x2="9" y2="-14" stroke="#8a6b4a" stroke-width="3"/><ellipse cx="11" cy="-17" rx="4" ry="5" fill="#9aa0a6"/>',
+    opencode: '<line x1="0" y1="1" x2="9" y2="-14" stroke="#8a6b4a" stroke-width="3"/><rect x="4" y="-22" width="14" height="7" rx="1.5" fill="#9aa0a6"/>',
+  };
+  return `<svg viewBox="0 0 64 56" aria-hidden="true"><g class="bob">`
+    + `<rect x="20" y="36" width="24" height="16" rx="5" fill="#425487"/>`
+    + `<rect x="20" y="44" width="24" height="3" fill="#2b3550"/>`
+    + `<circle cx="32" cy="30" r="9" fill="#f2c9a0"/>`
+    + `<polygon points="24,34 40,34 32,50" fill="#dcdce0"/>`
+    + `<circle cx="32" cy="31" r="2" fill="#d99a6c"/>`
+    + `<polygon points="32,2 16,24 48,24" fill="${hat}"/>`
+    + `<rect x="12" y="22" width="40" height="5" rx="2" fill="${hat}"/>`
+    + `<circle cx="32" cy="4" r="2.5" fill="#fff"/>`
+    + `<line x1="40" y1="42" x2="44" y2="40" stroke="#f2c9a0" stroke-width="3"/>`
+    + `<circle cx="44" cy="40" r="2.5" fill="#f2c9a0"/>`
+    + `<g class="swing" transform="translate(44,40)">${tools[tool] || tools.codex}</g>`
+    + `</g></svg>`;
+}
+
+// Pocket-size gnome head for tile mascots, row porters and flags.
+function gnomeHead(color) {
+  return `<svg class="ghead" viewBox="0 0 40 40" aria-hidden="true"><polygon points="20,2 8,20 32,20" fill="${color}"/><rect x="6" y="18" width="28" height="4" rx="2" fill="${color}"/><circle cx="20" cy="25" r="7" fill="#f2c9a0"/><polygon points="14,28 26,28 20,37" fill="#dcdce0"/><circle cx="20" cy="26" r="1.6" fill="#d99a6c"/></svg>`;
+}
+
+function flagSVG() {
+  return `<svg viewBox="0 0 14 14" aria-hidden="true"><line x1="3" y1="1" x2="3" y2="13" stroke="#9aa0a3" stroke-width="1.4"/><polygon points="3,1 13,4 3,7" fill="#6E56CF"/></svg>`;
+}
+
+function rodSVG() {
+  return `<svg viewBox="0 0 14 14" aria-hidden="true"><line x1="2" y1="1" x2="10" y2="6" stroke="#8a6b4a" stroke-width="1.4"/><line x1="10" y1="6" x2="10" y2="10" stroke="#9aa0a3" stroke-width="1"/><path d="M10 10 q0 2 -2 2" stroke="#9aa0a3" stroke-width="1" fill="none"/></svg>`;
+}
+
+function lookoutSVG() {
+  return `<svg viewBox="0 0 40 40" aria-hidden="true"><rect x="20" y="15" width="17" height="7" rx="3.5" transform="rotate(-20 20 18)" fill="#9aa0a6"/><polygon points="20,8 12,20 28,20" fill="#425487"/><circle cx="20" cy="25" r="7" fill="#f2c9a0"/><polygon points="14,28 26,28 20,37" fill="#dcdce0"/></svg>`;
+}
+
+function parcelSVG() {
+  return `<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="5" width="12" height="9" rx="1" fill="#b98a4a"/><line x1="8" y1="5" x2="8" y2="14" stroke="#e0a100" stroke-width="1.5"/><line x1="2" y1="8" x2="14" y2="8" stroke="#e0a100" stroke-width="1.5"/></svg>`;
+}
+
+function slateSVG() {
+  return `<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="3" width="14" height="10" rx="2" fill="none" stroke="#9aa0a3" stroke-width="1.2"/><line x1="4" y1="7" x2="12" y2="7" stroke="#9aa0a3" stroke-width="1.2"/><line x1="4" y1="10" x2="9" y2="10" stroke="#9aa0a3" stroke-width="1.2"/></svg>`;
+}
+
+function clerkSVG() {
+  return `<svg viewBox="0 0 40 40" aria-hidden="true"><polygon points="16,4 6,18 26,18" fill="#e0a100"/><circle cx="16" cy="23" r="6" fill="#f2c9a0"/><polygon points="11,26 21,26 16,33" fill="#dcdce0"/><rect x="22" y="22" width="14" height="14" rx="2" fill="#1c1c1f" stroke="#9aa0a3" stroke-width="1.5"/><line x1="22" y1="27" x2="36" y2="27" stroke="#9aa0a3" stroke-width="1.5"/></svg>`;
+}
+
+function bucketSVG(full) {
+  return `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3 h10 l-1.5 11 h-7 z" fill="${full ? "#8a6b4a" : "none"}" stroke="#8a6b4a" stroke-width="1.4"/></svg>`;
+}
+
+// Sand level = fraction of the calendar month elapsed. Truthful clock, not data.
+function glassSVG(frac) {
+  const sh = Math.min(8, Math.max(0, frac * 8));
+  const w = sh / 2;
+  return `<svg viewBox="0 0 12 18" aria-hidden="true"><polygon points="2,1 10,1 6,9" fill="none" stroke="#9aa0a3" stroke-width="1.1"/><polygon points="2,17 10,17 6,9" fill="none" stroke="#9aa0a3" stroke-width="1.1"/><polygon points="6,9 ${6 - w},${17 - sh} ${6 + w},${17 - sh}" fill="#e0a100"/></svg>`;
+}
+
+function shrugSVG() {
+  return `<svg class="shrug" viewBox="0 0 40 40" aria-hidden="true"><line x1="9" y1="31" x2="3" y2="21" stroke="#f2c9a0" stroke-width="2.5"/><line x1="31" y1="31" x2="37" y2="21" stroke="#f2c9a0" stroke-width="2.5"/><polygon points="20,8 12,20 28,20" fill="#6E56CF"/><circle cx="20" cy="25" r="7" fill="#f2c9a0"/><polygon points="14,28 26,28 20,37" fill="#dcdce0"/><circle cx="17.5" cy="24" r="1" fill="#333"/><circle cx="22.5" cy="24" r="1" fill="#333"/></svg>`;
+}
+
+// Arm-wrestle pair when a tile's current vs previous differ by 5x or more.
+function wrestle(cur, prev) {
+  if (!(prev > 0) || !(cur >= 0)) return "";
+  const r = cur / prev;
+  if (r < 5 && r > 1 / 5) return "";
+  const champ = r >= 5 ? "current" : "previous";
+  const odds = r >= 1 ? mult(r) : mult(1 / r);
+  return `<span class="wrestle" title="Showdown: current ${fmt(cur)} vs previous ${fmt(prev)} — ${champ} wins ×${odds}">${gnomeHead("#D97757")}<span class="vs">vs</span>${gnomeHead("#10A37F")}</span>`;
+}
+
+function renderCrew(recs, from, to) {
+  const crew = document.getElementById("crew");
+  const btn = document.getElementById("gnomes");
+  if (!crew) return;
+  if (btn) btn.textContent = "gnomes: " + (state.gnomes ? "on" : "off");
+  crew.hidden = !state.gnomes;
+  if (!state.gnomes) return;
+  if (!crew.children.length) {
+    crew.innerHTML = TOOLS.map((t) => `<div class="gnome" data-tool="${t}" role="button" tabindex="0" title="">${gnomeSVG(t)}<div class="tlabel">${t}</div><div class="rlabel"></div><div class="haul"><span class="sack">◆</span><span class="cart"><i></i></span></div><span class="zzz">z</span><span class="dust d1"></span><span class="dust d2"></span></div>`).join("");
+    crew.querySelectorAll(".gnome").forEach((el) => {
+      const toggle = () => toggleTool(el.dataset.tool);
+      el.addEventListener("click", toggle);
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+      });
+    });
+  }
+  // Aggregates ignore the tool filter so ghosted-off gnomes still report true rates.
+  const agg = {};
+  TOOLS.forEach((t) => (agg[t] = { active: 0, cost: 0, input: 0, cacheRead: 0, cacheWrite: 0 }));
+  for (const r of ALL) {
+    if (r.ts < from || r.ts > to) continue;
+    if (state.project && r.project !== state.project) continue;
+    if (!state.includeSub && r.sidechain) continue;
+    const a = agg[r.tool];
+    if (!a) continue;
+    a.active += r.active ?? (r.input + r.output);
+    if (r.cost != null) a.cost += r.cost;
+    a.input += r.input; a.cacheRead += r.cacheRead; a.cacheWrite += r.cacheWrite;
+  }
+  const spanSec = Math.max(((to || Date.now()) - (from || Date.now())) / 1000, 60);
+  const maxCost = Math.max(...TOOLS.map((t) => agg[t].cost), 0);
+  for (const el of crew.children) {
+    const t = el.dataset.tool;
+    const a = agg[t];
+    const rate = a.active / spanSec; // active tokens/sec
+    const spd = Math.min(1.5, Math.max(0.32, 1.5 - Math.log10(1 + rate) * 0.3));
+    el.style.setProperty("--spd", spd.toFixed(2) + "s");
+    const off = !state.tools.has(t);
+    const idle = a.active <= 0;
+    el.classList.toggle("off", off);
+    el.classList.toggle("idle", idle && !off);
+    el.classList.toggle("frenzy", rate > 1500 && !off && !idle);
+    el.querySelector(".rlabel").textContent = off ? "off" : idle ? "idle" : fmt(rate) + "/s";
+    el.title = off
+      ? `${t}: filtered out — click to include`
+      : idle
+        ? `${t}: idle in this window — click to filter`
+        : `${t}: ${fmt(a.active)} active (${fmt(rate)}/s) — click to filter`;
+    const sack = el.querySelector(".sack");
+    if (maxCost > 0 && a.cost > 0) {
+      sack.style.display = "";
+      sack.style.fontSize = (8 + 10 * (a.cost / maxCost)).toFixed(1) + "px";
+      sack.title = `${t} cost ${money(a.cost)}`;
+    } else {
+      sack.style.display = "none";
+    }
+    const denom = a.input + a.cacheRead + a.cacheWrite;
+    const hit = denom ? a.cacheRead / denom : 0;
+    el.querySelector(".cart i").style.width = (hit * 100).toFixed(0) + "%";
+    el.querySelector(".cart").title = `${t} cache hit ${(hit * 100).toFixed(1)}%`;
+  }
 }
 
 function renderHeat(recs) {
@@ -729,12 +1329,16 @@ function renderHeat(recs) {
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   let html = "<div></div>";
   for (let h = 0; h < 24; h++) html += `<div class="lbl" style="text-align:center">${h}</div>`;
+  let struck = false; // richest vein gets the miner's gold outline
   grid.forEach((row, di) => {
     html += `<div class="lbl">${days[di]}</div>`;
-    row.forEach((v) => {
+    row.forEach((v, h) => {
       const a = v / max;
       const bg = v ? `rgba(110,86,207,${(0.1 + 0.9 * a).toFixed(2)})` : "transparent";
-      html += `<div class="cell" title="${metricFmt(v)}${state.metric === "cost" ? "" : " " + state.metric}" style="background:${bg};border:1px solid var(--border)"></div>`;
+      const strike = !struck && v > 0 && v === max;
+      if (strike) struck = true;
+      const stilly = !v && h < 6 ? " stilly" : "";
+      html += `<div class="cell${strike ? " strike" : ""}${stilly}" title="${strike ? "Richest vein: " : stilly ? "Dead of night — no activity · " : ""}${metricFmt(v)}${state.metric === "cost" ? "" : " " + state.metric}" style="background:${bg};border:1px solid var(--border)"></div>`;
     });
   });
   document.getElementById("heatmap").innerHTML = html;
@@ -756,10 +1360,10 @@ function renderHeat(recs) {
   const pct = (v) => (total ? (v / total * 100).toFixed(0) + "%" : "—");
   const costTotal = recs.reduce((x, r) => x + (r.cost || 0), 0);
   const rows = [
-    ["Peak hour", peakH + ":00 · " + metricFmt(perHour[peakH])],
+    ["Peak hour", `<span class="pflag" title="Peak activity hour">${flagSVG()}</span> ` + peakH + ":00 · " + metricFmt(perHour[peakH])],
     ["Peak weekday", days[peakD] + " · " + metricFmt(perDay[peakD])],
     ["Quietest weekday", days[quietD] + " · " + metricFmt(perDay[quietD])],
-    ["Night share (0–6h)", pct(night)],
+    ["Night share (0–6h)", `<span class="fisher" title="Night fisherman watches 0–6h">${rodSVG()}</span> ` + pct(night)],
     ["Weekend share", pct(weekend)],
     ["Active-day streak", streak + "d"],
     ["Sessions in window", String(sessions.size)],
@@ -776,6 +1380,7 @@ const COLS = [
   ["active", "Active"], ["total", "Total"], ["cost", "Cost"],
 ];
 let lastRecs = [];
+let lastSessN = 0; // receptionist gnome greets sessions arriving after this count
 
 function renderTable(recs) {
   const groups = new Map();
@@ -871,24 +1476,44 @@ function rerender() {
 function tickLive() {
   const dot = document.getElementById("live-dot");
   const txt = document.getElementById("live-text");
+  const lo = document.getElementById("lookout");
+  const lookout = (mode, title) => {
+    if (!lo) return;
+    lo.className = "lookout " + mode;
+    lo.title = title;
+    if (!lo.innerHTML) lo.innerHTML = lookoutSVG();
+  };
   if (!LIVE) {
     dot.style.background = "#888";
     txt.textContent = "Static snapshot · run npm run usage:serve for live";
+    lookout("snooze", "Lookout off duty — static snapshot");
     return;
   }
   if (offline) {
     dot.style.background = "#ef4444";
     txt.textContent = lastOk ? `offline · updated ${Math.floor((Date.now() - lastOk) / 1000)}s ago` : "offline · connecting…";
+    lookout("down", "Lookout lost the trail — reconnecting");
     return;
   }
   if (!lastOk) {
     dot.style.background = "#eab308";
     txt.textContent = "Live · connecting…";
+    lookout("scope", "Lookout scanning for data…");
     return;
   }
   const s = Math.floor((Date.now() - lastOk) / 1000);
-  dot.style.background = s < 30 ? "#22c55e" : "#ef4444";
+  const stale = s >= 30;
+  dot.style.background = stale ? "#ef4444" : "#22c55e";
   txt.textContent = `Live · updated ${s}s ago`;
+  lookout(stale ? "down" : "scope", stale ? "Lookout: trail gone cold" : "Lookout on duty — scanning live");
+}
+
+function setCourier(kind, title) {
+  const c = document.getElementById("courier");
+  if (!c) return;
+  c.className = "courier " + kind;
+  c.title = title;
+  c.innerHTML = kind === "same" ? slateSVG() : parcelSVG();
 }
 
 async function poll() {
@@ -904,10 +1529,12 @@ async function poll() {
       setMeta();
       lastOk = Date.now();
       offline = false;
+      setCourier("fresh", "Courier delivered fresh records");
       rerender();
     } else if (res.status === 304) {
       lastOk = Date.now();
       offline = false;
+      setCourier("same", "Courier reports: nothing new on the server");
       if (state.preset !== "custom") rerender(); // rolling range: "now" moved
     } else {
       offline = true;
@@ -938,15 +1565,29 @@ function initTheme() {
   applyTheme();
 }
 
-if (!window.USAGE && !LIVE) {
-  document.getElementById("nousage").hidden = false;
-  initTheme();
-} else {
+function boot() {
+  if (!window.USAGE && !LIVE) {
+    document.getElementById("nousage").hidden = false;
+    document.getElementById("nousage").insertAdjacentHTML("afterbegin", shrugSVG());
+    initTheme();
+    return;
+  }
   document.getElementById("app").hidden = false;
   if (window.USAGE) ALL = expand();
   init();
   if (LIVE) startLive();
   tickLive();
+}
+
+if (LIVE) {
+  boot(); // live payload arrives via /api/usage; data.js is never requested (no 404)
+} else {
+  // Static snapshot (file://): fetch the generated payload next to this file.
+  const s = document.createElement("script");
+  s.src = "./data.js";
+  s.onload = boot;
+  s.onerror = boot; // window.USAGE stays unset -> "run npm run usage" message
+  document.head.appendChild(s);
 }
 </script>
 </body>
