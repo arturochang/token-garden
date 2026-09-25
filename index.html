@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Usage Dashboard</title>
+<script src="./data.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #666; --card: #f5f5f5;
+    --border: #ddd; --up: #b91c1c; --down: #15803d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111113; --fg: #e8e8e8; --muted: #a1a1aa; --card: #1c1c1f;
+      --border: #333; --up: #f87171; --down: #4ade80;
+    }
+  }
+  body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); margin: 0; padding: 16px; }
+  h1 { font-size: 1.4rem; margin: 0 0 12px; }
+  #controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+  #controls .group { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+  button { cursor: pointer; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--fg); }
+  button.active { background: var(--fg); color: var(--bg); }
+  button.tool.on[data-tool="claude"] { background: #D97757; color: #fff; border-color: #D97757; }
+  button.tool.on[data-tool="codex"] { background: #10A37F; color: #fff; border-color: #10A37F; }
+  button.tool.on[data-tool="opencode"] { background: #6E56CF; color: #fff; border-color: #6E56CF; }
+  input, select { padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--fg); }
+  label { font-size: 0.85rem; }
+  #kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-bottom: 14px; }
+  .kpi { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .kpi .name { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; }
+  .kpi .val { font-size: 1.25rem; font-weight: 700; }
+  .kpi .delta { font-size: 0.75rem; }
+  .delta.up { color: var(--up); } .delta.down { color: var(--down); } .delta.flat { color: var(--muted); }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  @media (max-width: 900px) { .charts { grid-template-columns: 1fr; } }
+  .chart-box { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+  .chart-box h3 { margin: 0 0 6px; font-size: 0.9rem; }
+  .chart-box canvas { max-height: 260px; }
+  #heatmap { display: grid; grid-template-columns: 40px repeat(24, 1fr); gap: 2px; font-size: 0.65rem; }
+  #heatmap .cell { aspect-ratio: 1; border-radius: 2px; min-width: 8px; }
+  #heatmap .lbl { color: var(--muted); align-self: center; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  th { cursor: pointer; text-align: left; border-bottom: 2px solid var(--border); padding: 4px 6px; white-space: nowrap; }
+  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td { border-bottom: 1px solid var(--border); padding: 4px 6px; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
+  #nousage { font-size: 1.1rem; padding: 40px; text-align: center; }
+  #meta { color: var(--muted); font-size: 0.8rem; margin-bottom: 10px; }
+  #live { margin-right: 10px; white-space: nowrap; }
+  #live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+</style>
+</head>
+<body>
+<h1>Token Usage</h1>
+<div id="nousage" hidden>Run <code>npm run usage</code> first.</div>
+<div id="app" hidden>
+  <div id="meta"><span id="live"><span id="live-dot"></span><span id="live-text"></span></span><span id="meta-text"></span></div>
+  <div id="controls">
+    <div class="group" id="presets">
+      <button data-range="1h">1h</button>
+      <button data-range="6h">6h</button>
+      <button data-range="today">Today</button>
+      <button data-range="7d">7d</button>
+      <button data-range="30d" class="active">30d</button>
+      <button data-range="90d">90d</button>
+      <button data-range="all">All</button>
+    </div>
+    <div class="group">
+      <label>from <input type="date" id="from"></label>
+      <label>to <input type="date" id="to"></label>
+    </div>
+    <div class="group" id="tools">
+      <button class="tool on" data-tool="claude">claude</button>
+      <button class="tool on" data-tool="codex">codex</button>
+      <button class="tool on" data-tool="opencode">opencode</button>
+    </div>
+    <div class="group">
+      <label>project <select id="project"><option value="">All</option></select></label>
+    </div>
+    <div class="group">
+      <label><input type="checkbox" id="sub" checked> Include subagents</label>
+    </div>
+  </div>
+  <div id="kpis"></div>
+  <div class="charts">
+    <div class="chart-box"><h3>Tokens over time</h3><canvas id="c-tokens"></canvas></div>
+    <div class="chart-box"><h3>Cost over time</h3><canvas id="c-cost"></canvas></div>
+    <div class="chart-box"><h3>Token mix by tool</h3><canvas id="c-mix"></canvas></div>
+    <div class="chart-box"><h3>Top models</h3><canvas id="c-models"></canvas></div>
+  </div>
+  <div class="chart-box" style="margin-bottom:14px"><h3>Activity heatmap (day × hour)</h3><div id="heatmap"></div></div>
+  <div class="chart-box"><h3>Sessions</h3>
+    <table id="sessions"><thead><tr></tr></thead><tbody></tbody></table>
+    <button id="more" style="margin-top:8px">show more</button>
+  </div>
+</div>
+<script>
+const COLORS = { claude: "#D97757", codex: "#10A37F", opencode: "#6E56CF" };
+const TOOLS = ["claude", "codex", "opencode"];
+
+function expand() {
+  const { fields, rows } = window.USAGE;
+  return rows.map((r) => {
+    const o = {};
+    fields.forEach((f, i) => (o[f] = r[i]));
+    return o;
+  });
+}
+
+function fmt(n) {
+  if (n == null) return "—";
+  if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(n >= 1e5 ? 0 : 1).replace(/\.0$/, "") + "k";
+  return String(Math.round(n * 10) / 10);
+}
+function money(n) { return n == null ? "—" : "$" + n.toFixed(2); }
+function totalOf(r) {
+  return r.input + r.cacheRead + r.cacheWrite + r.output + (r.tool === "opencode" ? r.reasoning : 0);
+}
+function dur(ms) {
+  if (ms <= 0) return "—";
+  const m = Math.round(ms / 60000);
+  if (m < 60) return m + "m";
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + "h" + (m % 60 ? (m % 60) + "m" : "");
+  return Math.floor(h / 24) + "d" + (h % 24 ? (h % 24) + "h" : "");
+}
+
+const state = {
+  preset: "30d",
+  tools: new Set(TOOLS),
+  project: "",
+  includeSub: true,
+  sortKey: "total",
+  sortDir: -1,
+  shown: 50,
+};
+
+let ALL = [];
+function setMeta() {
+  document.getElementById("meta-text").textContent =
+    ALL.length + " records · generated " +
+    (window.USAGE ? new Date(window.USAGE.generatedAt).toLocaleString() : "—");
+}
+function refreshProjects() {
+  const sel = document.getElementById("project");
+  const projects = [...new Set(ALL.map((r) => r.project))].sort();
+  const have = [...sel.options].map((o) => o.value);
+  if (have.length === projects.length + 1 && projects.every((p) => have.includes(p))) return;
+  sel.innerHTML = '<option value="">All</option>';
+  for (const p of projects) {
+    const o = document.createElement("option");
+    o.value = p; o.textContent = p;
+    sel.appendChild(o);
+  }
+  sel.value = state.project;
+}
+function init() {
+  setMeta();
+  refreshProjects();
+  const sel = document.getElementById("project");
+  document.querySelectorAll("#presets button").forEach((b) =>
+    b.addEventListener("click", () => {
+      document.querySelectorAll("#presets button").forEach((x) => x.classList.remove("active"));
+      b.classList.add("active");
+      state.preset = b.dataset.range;
+      document.getElementById("from").value = "";
+      document.getElementById("to").value = "";
+      state.shown = 50;
+      render();
+    })
+  );
+  document.querySelectorAll("#tools button").forEach((b) =>
+    b.addEventListener("click", () => {
+      const t = b.dataset.tool;
+      if (state.tools.has(t)) { state.tools.delete(t); b.classList.remove("on"); }
+      else { state.tools.add(t); b.classList.add("on"); }
+      state.shown = 50;
+      render();
+    })
+  );
+  sel.addEventListener("change", () => { state.project = sel.value; state.shown = 50; render(); });
+  document.getElementById("sub").addEventListener("change", (e) => {
+    state.includeSub = e.target.checked; state.shown = 50; render();
+  });
+  const custom = () => {
+    const f = document.getElementById("from").value, t = document.getElementById("to").value;
+    if (f || t) {
+      document.querySelectorAll("#presets button").forEach((x) => x.classList.remove("active"));
+      state.preset = "custom";
+      state.shown = 50;
+      render();
+    }
+  };
+  document.getElementById("from").addEventListener("change", custom);
+  document.getElementById("to").addEventListener("change", custom);
+  document.getElementById("more").addEventListener("click", () => { state.shown += 50; render(); });
+  render();
+}
+
+function range() {
+  const now = Date.now();
+  const day = 86400000;
+  switch (state.preset) {
+    case "1h": return [now - 3600000, now];
+    case "6h": return [now - 6 * 3600000, now];
+    case "today": { const d = new Date(); d.setHours(0, 0, 0, 0); return [d.getTime(), now]; }
+    case "7d": return [now - 7 * day, now];
+    case "30d": return [now - 30 * day, now];
+    case "90d": return [now - 90 * day, now];
+    case "all": {
+      if (!ALL.length) return [now, now];
+      return [Math.min(...ALL.map((r) => r.ts)), now];
+    }
+    case "custom": {
+      const f = document.getElementById("from").value, t = document.getElementById("to").value;
+      const from = f ? new Date(f + "T00:00:00").getTime() : Math.min(...ALL.map((r) => r.ts));
+      const to = t ? new Date(t + "T23:59:59.999").getTime() : now;
+      return [from, to];
+    }
+  }
+}
+
+function filtered(from, to) {
+  return ALL.filter(
+    (r) =>
+      r.ts >= from && r.ts <= to &&
+      state.tools.has(r.tool) &&
+      (!state.project || r.project === state.project) &&
+      (state.includeSub || !r.sidechain)
+  );
+}
+
+function kpis(recs) {
+  const s = new Set();
+  const k = { total: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, cost: 0, costN: 0 };
+  for (const r of recs) {
+    s.add(r.tool + ":" + r.session);
+    k.total += totalOf(r);
+    k.input += r.input; k.cacheRead += r.cacheRead; k.cacheWrite += r.cacheWrite; k.output += r.output;
+    if (r.cost != null) { k.cost += r.cost; k.costN++; }
+  }
+  k.sessions = s.size;
+  k.avg = k.sessions ? k.total / k.sessions : 0;
+  const denom = k.input + k.cacheRead + k.cacheWrite;
+  k.hit = denom ? k.cacheRead / denom : 0;
+  return k;
+}
+
+function delta(cur, prev) {
+  if (prev === 0) return cur === 0 ? ["—", "flat"] : ["▲ new", "up"];
+  const pct = ((cur - prev) / Math.abs(prev)) * 100;
+  if (Math.abs(pct) < 0.05) return ["0%", "flat"];
+  return [(pct > 0 ? "▲ " : "▼ ") + Math.abs(pct).toFixed(0) + "%", pct > 0 ? "up" : "down"];
+}
+
+const charts = {};
+function makeChart(id, cfg) {
+  if (charts[id]) { charts[id].data = cfg.data; charts[id].update("none"); }
+  else charts[id] = new Chart(document.getElementById(id), cfg);
+}
+function gridColor() {
+  return matchMedia("(prefers-color-scheme: dark)").matches ? "#333" : "#ddd";
+}
+
+function bucketize(recs, from, to) {
+  const span = to - from;
+  const mode = span <= 6 * 3600000 ? "min" : span <= 2 * 86400000 ? "hour" : span <= 120 * 86400000 ? "day" : "week";
+  const minStep = (span <= 3600000 ? 5 : 15) * 60000; // 5-min buckets for 1h, 15-min up to 6h
+  const buckets = new Map();
+  const keyOf = (ts) => {
+    const d = new Date(ts);
+    if (mode === "min") return Math.floor(ts / minStep) * minStep;
+    if (mode === "hour") return new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()).getTime();
+    if (mode === "day") return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    return monday.getTime();
+  };
+  for (const r of recs) {
+    const k = keyOf(r.ts);
+    if (!buckets.has(k)) buckets.set(k, { ts: k, claude: 0, codex: 0, opencode: 0, cost: { claude: 0, codex: 0, opencode: 0 } });
+    const b = buckets.get(k);
+    b[r.tool] += totalOf(r);
+    if (r.cost != null) b.cost[r.tool] += r.cost;
+  }
+  return [...buckets.values()].sort((a, b) => a.ts - b.ts);
+}
+function bucketLabel(ts, from, to) {
+  const span = to - from;
+  const d = new Date(ts);
+  if (span <= 6 * 3600000) return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (span <= 2 * 86400000) return d.toLocaleString([], { month: "numeric", day: "numeric", hour: "numeric" });
+  return d.toLocaleDateString([], { month: "numeric", day: "numeric" });
+}
+
+function render() {
+  const [from, to] = range();
+  const recs = filtered(from, to);
+  const len = to - from;
+  const prev = filtered(from - len, from - 1);
+  renderKpis(recs, prev);
+  renderTimeCharts(recs, from, to);
+  renderMix(recs);
+  renderModels(recs);
+  renderHeat(recs);
+  renderTable(recs);
+}
+
+function renderKpis(recs, prev) {
+  const a = kpis(recs), b = kpis(prev);
+  const tiles = [
+    ["Total tokens", fmt(a.total), delta(a.total, b.total)],
+    ["Fresh input", fmt(a.input), delta(a.input, b.input)],
+    ["Cache read", fmt(a.cacheRead), delta(a.cacheRead, b.cacheRead)],
+    ["Cache write", fmt(a.cacheWrite), delta(a.cacheWrite, b.cacheWrite)],
+    ["Output", fmt(a.output), delta(a.output, b.output)],
+    ["Cache hit rate", (a.hit * 100).toFixed(1) + "%", delta(a.hit, b.hit)],
+    ["Est. cost", money(a.cost), delta(a.cost, b.cost)],
+    ["Sessions", String(a.sessions), delta(a.sessions, b.sessions)],
+    ["Avg tok/session", fmt(a.avg), delta(a.avg, b.avg)],
+  ];
+  document.getElementById("kpis").innerHTML = tiles
+    .map(([n, v, [d, c]]) => `<div class="kpi"><div class="name">${n}</div><div class="val">${v}</div><div class="delta ${c}">${d}</div></div>`)
+    .join("");
+}
+
+function renderTimeCharts(recs, from, to) {
+  const buckets = bucketize(recs, from, to);
+  const labels = buckets.map((b) => bucketLabel(b.ts, from, to));
+  makeChart("c-tokens", {
+    type: "bar",
+    data: {
+      labels,
+      datasets: TOOLS.map((t) => ({ label: t, data: buckets.map((b) => b[t]), backgroundColor: COLORS[t] })),
+    },
+    options: { responsive: true, scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: fmt } } } },
+  });
+  makeChart("c-cost", {
+    type: "line",
+    data: {
+      labels,
+      datasets: TOOLS.map((t) => ({
+        label: t, data: buckets.map((b) => Math.round(b.cost[t] * 100) / 100),
+        borderColor: COLORS[t], backgroundColor: COLORS[t], tension: 0.2,
+      })),
+    },
+    options: { responsive: true, scales: { y: { ticks: { callback: (v) => "$" + v } } } },
+  });
+}
+
+function renderMix(recs) {
+  const agg = {};
+  TOOLS.forEach((t) => (agg[t] = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 }));
+  for (const r of recs) {
+    agg[r.tool].input += r.input;
+    agg[r.tool].cacheRead += r.cacheRead;
+    agg[r.tool].cacheWrite += r.cacheWrite;
+    agg[r.tool].output += r.output + (r.tool === "opencode" ? r.reasoning : 0);
+  }
+  const parts = [
+    ["input", "#8888cc"], ["cacheRead", "#4caf7d"], ["cacheWrite", "#e0a100"], ["output", "#d97757"],
+  ];
+  makeChart("c-mix", {
+    type: "bar",
+    data: {
+      labels: TOOLS,
+      datasets: parts.map(([k, c]) => ({ label: k, data: TOOLS.map((t) => agg[t][k]), backgroundColor: c })),
+    },
+    options: { indexAxis: "y", responsive: true, scales: { x: { stacked: true, ticks: { callback: fmt } }, y: { stacked: true } } },
+  });
+}
+
+function renderModels(recs) {
+  const byModel = {};
+  for (const r of recs) byModel[r.model] = (byModel[r.model] || 0) + totalOf(r);
+  const top = Object.entries(byModel).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  makeChart("c-models", {
+    type: "bar",
+    data: {
+      labels: top.map(([m]) => m),
+      datasets: [{ data: top.map(([, v]) => v), backgroundColor: "#6E56CF" }],
+    },
+    options: { indexAxis: "y", responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { callback: fmt } } } },
+  });
+}
+
+function renderHeat(recs) {
+  const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
+  for (const r of recs) {
+    const d = new Date(r.ts);
+    grid[(d.getDay() + 6) % 7][d.getHours()] += totalOf(r);
+  }
+  const max = Math.max(1, ...grid.flat());
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  let html = "<div></div>";
+  for (let h = 0; h < 24; h++) html += `<div class="lbl" style="text-align:center">${h}</div>`;
+  grid.forEach((row, di) => {
+    html += `<div class="lbl">${days[di]}</div>`;
+    row.forEach((v) => {
+      const a = v / max;
+      const bg = v ? `rgba(110,86,207,${(0.1 + 0.9 * a).toFixed(2)})` : "transparent";
+      html += `<div class="cell" title="${fmt(v)} tokens" style="background:${bg};border:1px solid var(--border)"></div>`;
+    });
+  });
+  document.getElementById("heatmap").innerHTML = html;
+}
+
+const COLS = [
+  ["tool", "Tool"], ["project", "Project"], ["title", "Title / session"],
+  ["models", "Model(s)"], ["start", "Start"], ["duration", "Duration"],
+  ["input", "Input"], ["cacheRead", "Cache read"], ["output", "Output"],
+  ["total", "Total"], ["cost", "Cost"],
+];
+let lastRecs = [];
+
+function renderTable(recs) {
+  const groups = new Map();
+  for (const r of recs) {
+    const k = r.tool + ":" + r.session;
+    if (!groups.has(k)) {
+      groups.set(k, {
+        tool: r.tool, session: r.session, title: r.title, project: r.project,
+        models: new Set(), start: r.ts, end: r.ts,
+        input: 0, cacheRead: 0, output: 0, total: 0, cost: 0, costKnown: false,
+      });
+    }
+    const g = groups.get(k);
+    g.models.add(r.model);
+    g.start = Math.min(g.start, r.ts); g.end = Math.max(g.end, r.ts);
+    g.input += r.input; g.cacheRead += r.cacheRead; g.output += r.output;
+    g.total += totalOf(r);
+    if (r.cost != null) { g.cost += r.cost; g.costKnown = true; }
+  }
+  lastRecs = [...groups.values()].map((g) => ({
+    ...g, models: [...g.models].join(", "), duration: g.end - g.start,
+    cost: g.costKnown ? g.cost : null,
+  }));
+  const thead = document.querySelector("#sessions thead tr");
+  thead.innerHTML = COLS.map(([k, lbl]) => {
+    const arrow = state.sortKey === k ? (state.sortDir === 1 ? " ▲" : " ▼") : "";
+    const cls = ["input", "cacheRead", "output", "total", "cost", "duration"].includes(k) ? ' class="num"' : "";
+    return `<th data-k="${k}"${cls}>${lbl}${arrow}</th>`;
+  }).join("");
+  thead.querySelectorAll("th").forEach((th) =>
+    th.addEventListener("click", () => {
+      const k = th.dataset.k;
+      if (state.sortKey === k) state.sortDir *= -1;
+      else { state.sortKey = k; state.sortDir = k === "tool" || k === "project" || k === "title" || k === "models" ? 1 : -1; }
+      renderTable(recs);
+    })
+  );
+  lastRecs.sort((a, b) => {
+    const x = a[state.sortKey], y = b[state.sortKey];
+    if (x == null && y == null) return 0;
+    if (x == null) return 1; if (y == null) return -1;
+    return (x < y ? -1 : x > y ? 1 : 0) * state.sortDir;
+  });
+  const tbody = document.querySelector("#sessions tbody");
+  const show = lastRecs.slice(0, state.shown);
+  tbody.innerHTML = show.map((g) => {
+    const label = g.title || g.session.slice(0, 8);
+    const tip = (g.title ? g.title + " · " + g.session : g.session).replace(/"/g, "&quot;");
+    const start = new Date(g.start).toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    return `<tr>
+      <td><span class="dot" style="background:${COLORS[g.tool]}"></span>${g.tool}</td>
+      <td>${g.project}</td>
+      <td title="${tip}">${label.length > 40 ? label.slice(0, 40) + "…" : label}</td>
+      <td>${g.models.length > 40 ? g.models.slice(0, 40) + "…" : g.models}</td>
+      <td>${start}</td><td>${dur(g.duration)}</td>
+      <td class="num">${fmt(g.input)}</td><td class="num">${fmt(g.cacheRead)}</td>
+      <td class="num">${fmt(g.output)}</td><td class="num">${fmt(g.total)}</td>
+      <td class="num">${money(g.cost)}</td>
+    </tr>`;
+  }).join("");
+  document.getElementById("more").style.display = lastRecs.length > state.shown ? "" : "none";
+}
+
+const LIVE = location.protocol === "http:";
+let etag = null;
+let lastOk = 0;
+let offline = false;
+
+function rerender() {
+  const y = window.scrollY;
+  render();
+  window.scrollTo(0, y);
+}
+
+function tickLive() {
+  const dot = document.getElementById("live-dot");
+  const txt = document.getElementById("live-text");
+  if (!LIVE) {
+    dot.style.background = "#888";
+    txt.textContent = "Static snapshot · run npm run usage:serve for live";
+    return;
+  }
+  if (offline) {
+    dot.style.background = "#ef4444";
+    txt.textContent = lastOk ? `offline · updated ${Math.floor((Date.now() - lastOk) / 1000)}s ago` : "offline · connecting…";
+    return;
+  }
+  if (!lastOk) {
+    dot.style.background = "#eab308";
+    txt.textContent = "Live · connecting…";
+    return;
+  }
+  const s = Math.floor((Date.now() - lastOk) / 1000);
+  dot.style.background = s < 30 ? "#22c55e" : "#ef4444";
+  txt.textContent = `Live · updated ${s}s ago`;
+}
+
+async function poll() {
+  try {
+    const headers = {};
+    if (etag) headers["If-None-Match"] = etag;
+    const res = await fetch("/api/usage", { headers, cache: "no-store" });
+    if (res.status === 200) {
+      etag = res.headers.get("ETag");
+      window.USAGE = await res.json();
+      ALL = expand();
+      refreshProjects();
+      setMeta();
+      lastOk = Date.now();
+      offline = false;
+      rerender();
+    } else if (res.status === 304) {
+      lastOk = Date.now();
+      offline = false;
+      if (state.preset !== "custom") rerender(); // rolling range: "now" moved
+    } else {
+      offline = true;
+    }
+  } catch {
+    offline = true;
+  }
+  tickLive();
+}
+
+function startLive() {
+  poll();
+  setInterval(poll, 10000);
+  setInterval(tickLive, 1000);
+}
+
+if (!window.USAGE && !LIVE) {
+  document.getElementById("nousage").hidden = false;
+} else {
+  document.getElementById("app").hidden = false;
+  if (window.USAGE) ALL = expand();
+  init();
+  if (LIVE) startLive();
+  tickLive();
+}
+</script>
+</body>
+</html>
