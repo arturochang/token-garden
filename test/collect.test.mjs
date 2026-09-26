@@ -63,6 +63,9 @@ test("collects, dedupes, and normalizes synthetic Claude and Codex logs", () => 
     assert.equal(anon.anonymized, true);
     const aIdx = Object.fromEntries(anon.fields.map((f, i) => [f, i]));
     assert.ok(anon.rows.every((r) => r[aIdx.title] === null && /^[0-9a-f]{16}$/.test(r[aIdx.session])));
+    // Workspace can resolve to "unknown" when the fixture path sits inside a real repo.
+    assert.ok(anon.rows.every((r) => r[aIdx.project] === "project-1" && ["project-1", "unknown"].includes(r[aIdx.workspace])),
+      "folder names replaced with stable labels");
 
     // Warm cache round-trip yields identical rows.
     collector.flush();

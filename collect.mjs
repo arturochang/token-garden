@@ -748,12 +748,22 @@ export function aggregateGroups(payload, groupBy = "model") {
 
 export function anonymizePayload(payload) {
   const recs = expandPayload(payload);
+  // Folder names can reveal clients or products: replace them with stable
+  // labels (same name -> same label) so grouping still works in the export.
+  const labels = new Map();
+  const label = (name) => {
+    if (name == null || name === "unknown") return name ?? null;
+    if (!labels.has(name)) labels.set(name, `project-${labels.size + 1}`);
+    return labels.get(name);
+  };
   const rows = recs.map((r) => {
     const session = crypto.createHash("sha256").update(r.tool + ":" + r.session).digest("hex").slice(0, 16);
     const o = {
       ...r,
       session,
       title: null, // prompts stay local
+      project: label(r.project),
+      workspace: label(r.workspace),
     };
     delete o._key;
     return FIELDS.map((f) => o[f] ?? null);

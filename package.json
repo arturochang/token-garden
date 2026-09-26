@@ -4,12 +4,13 @@
   "private": true,
   "description": "Privacy-first local token usage and cost dashboard for Claude Code, Codex, and OpenCode.",
   "license": "MIT",
+  "author": "LAB256 LLC (https://lab256.com)",
   "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/arturochang/token-garden.git"
   },
-  "homepage": "https://github.com/arturochang/token-garden#readme",
+  "homepage": "https://lab256.com/blog/token-garden/",
   "bugs": "https://github.com/arturochang/token-garden/issues",
   "keywords": [
     "claude-code",

@@ -90,10 +90,6 @@ The public repository ships only the original garden gnomes. In live mode, Token
 
 Token Garden's accounting and dashboard design were informed by [tokscale](https://github.com/junhoyeo/tokscale) and [codex-token-dashboard](https://github.com/xiaoqi8553/codex-token-dashboard). Their projects remain independently licensed.
 
-## License
-
-[MIT](LICENSE). Use it, fork it, remix it, and give your own agents a garden.
-
 ## What it shows
 
 - **Time range:** 1h, 3h, 6h, Today, 7d, 30d, 90d, All, or custom dates. Chart bars are 5 min wide for 1h, 15 min for up to 6h, hourly for up to 2 days, daily for up to 120 days, and weekly beyond that. Tokens/Cost charts overlay a dashed gray previous-period line for direct shape comparison (separate `prev` pills per chart), plus a `log` toggle (log scale keeps huge prev spikes from flattening the current period; stacking pauses in log mode). The control bar sticks while scrolling.
@@ -129,7 +125,7 @@ Token Garden's accounting and dashboard design were informed by [tokscale](https
 ```sh
 node collect.mjs --json --group-by=workspace+model  # aggregates to stdout
 node collect.mjs --json --group-by=tool --out=groups.json  # UTF-8 file (preferred on Windows: `>` writes UTF-16)
-node collect.mjs --snapshot=snapshot.json           # anonymized share (hashed sessions, no titles)
+node collect.mjs --snapshot=snapshot.json           # anonymized share: hashed sessions, no titles, projects as project-N
 ```
 
 ## Development
@@ -163,3 +159,9 @@ Contributions follow [AGENTS.md](AGENTS.md), which covers the extension points, 
 - OpenCode's database is re-queried in full on each refresh; very large OpenCode histories make refreshes slower.
 - The browser holds the whole payload in memory once, with repeated strings interned. Unchanged polls return 304 and trigger no re-parse.
 - Session titles for Claude/Codex are the first user message (truncated); low-value system prompts are skipped.
+
+## License
+
+[MIT](LICENSE) © LAB256 LLC. Use it, fork it, remix it, and give your own agents a garden.
+
+Made by [LAB256](https://lab256.com) · [Project page](https://lab256.com/blog/token-garden/)

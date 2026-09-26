@@ -19,7 +19,7 @@ node_modules/
 *.local
 *.key
 *.pem
-.claude/settings.local.json
+.claude/
 
 # Tool, editor, and OS artifacts. Browser-automation captures can show real usage.
 .playwright-cli/
