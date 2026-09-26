@@ -1,7 +1,31 @@
-data.js
-node_modules/
-prices-cache.json
-snapshot.json
-.usage-cache.json
-.usage-prefs.json
+# Local usage data and generated exports. These may contain prompts, paths,
+# project names, and session metadata; never commit them.
+/data.js
+/prices-cache.json
+/.usage-cache.json
+/.usage-prefs.json
+snapshot*.json
+groups*.json
+*.tmp
 
+# Personal crews (including fan art of existing characters) stay local.
+crews/private/
+
+# Dependencies, local configuration, and secrets.
+node_modules/
+.env
+.env.*
+!.env.example
+*.local
+*.key
+*.pem
+.claude/settings.local.json
+
+# Tool, editor, and OS artifacts. Browser-automation captures can show real usage.
+.playwright-cli/
+.vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini

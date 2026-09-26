@@ -1,14 +1,29 @@
 {
-  "name": "agent-usage",
+  "name": "token-garden",
   "version": "1.0.0",
   "private": true,
-  "description": "Local token usage dashboard for Claude Code, Codex and OpenCode. Never deployed.",
+  "description": "Privacy-first local token usage and cost dashboard for Claude Code, Codex, and OpenCode.",
+  "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arturochang/token-garden.git"
+  },
+  "homepage": "https://github.com/arturochang/token-garden#readme",
+  "bugs": "https://github.com/arturochang/token-garden/issues",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "opencode",
+    "token-usage",
+    "dashboard"
+  ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "usage": "node collect.mjs",
-    "usage:serve": "node serve.mjs"
+    "usage:serve": "node serve.mjs",
+    "test": "node --test test/*.test.mjs"
   }
 }

@@ -8,11 +8,22 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { costFor, refreshPrices } from "./prices.mjs";
+import { costFor, priceInfoFor, priceMeta, refreshPrices } from "./prices.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const outFile = path.join(here, "data.js");
-const home = os.homedir();
+
+// Write-then-rename so a crash or concurrent reader never sees a torn file.
+export function writeFileAtomic(file, text) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, text, "utf8");
+  try {
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    try { fs.unlinkSync(tmp); } catch { /* already gone */ }
+    throw err;
+  }
+}
 
 // Normalized record field order (rows are arrays in this order).
 // NOTE: workspace/active/estimated appended at end so old snapshots degrade
@@ -20,7 +31,7 @@ const home = os.homedir();
 const FIELDS = [
   "tool", "session", "title", "project", "model", "ts",
   "input", "cacheRead", "cacheWrite", "output", "reasoning", "cost", "sidechain",
-  "workspace", "active", "estimated",
+  "workspace", "active", "estimated", "reasoningSeparate",
 ];
 
 const DRIVE_ROOT_RE = /^[a-zA-Z]:$/;
@@ -239,7 +250,7 @@ function walkJsonl(dir, match) {
   }
   for (const e of entries) {
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) out.push(...walkJsonl(p, match));
+    if (e.isDirectory()) { for (const f of walkJsonl(p, match)) out.push(f); }
     else if (e.isFile() && match(e.name, p)) out.push(p);
   }
   return out;
@@ -249,8 +260,8 @@ function readLines(file) {
   return fs.readFileSync(file, "utf8").split("\n");
 }
 
-function activeOf(tool, { input = 0, output = 0, reasoning = 0 }) {
-  return input + output + (tool === "opencode" ? reasoning : 0);
+function activeOf({ input = 0, output = 0, reasoning = 0, reasoningSeparate = false }) {
+  return input + output + (reasoningSeparate ? reasoning : 0);
 }
 
 // Parse one Claude JSONL file. Dedupe across files happens later, so each
@@ -291,8 +302,9 @@ function parseClaudeFile(file) {
       reasoning: 0,
       cost: costFor(model, { input, cacheRead, cacheWrite, output }),
       sidechain: o.isSidechain === true,
-      active: activeOf("claude", { input, output }),
+      active: activeOf({ input, output }),
       estimated: 0,
+      reasoningSeparate: 0,
       _key: key,
     });
   }
@@ -336,8 +348,9 @@ function parseCodexFile(file) {
       reasoning: selected.reasoning,
       cost: costFor(m, { input, cacheRead: selected.cached, cacheWrite: selected.cacheWrite, output: selected.output }),
       sidechain: false,
-      active: activeOf("codex", { input, output: selected.output }),
+      active: activeOf({ input, output: selected.output }),
       estimated: 0,
+      reasoningSeparate: 0,
     });
   }
 
@@ -421,6 +434,7 @@ function parseCodexFile(file) {
         sidechain: false,
         active: est,
         estimated: 1,
+        reasoningSeparate: 0,
       });
     }
   }
@@ -446,34 +460,55 @@ function refreshCache(cache, files, parse, onMiss) {
       continue;
     }
     const hit = cache.get(file);
+    // Loops, not push(...records): spreading very large arrays overflows the stack.
     if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
-      all.push(...hit.records);
+      for (const r of hit.records) all.push(r);
     } else {
       const records = parse(file);
       cache.set(file, { mtimeMs: st.mtimeMs, size: st.size, records });
       if (onMiss) onMiss();
-      all.push(...records);
+      for (const r of records) all.push(r);
     }
   }
   return all;
 }
 
 function totalOf(r) {
-  // Reasoning counts toward totals only when the tool counts it separately
-  // (OpenCode). Codex reasoning is a subset of output; Claude has none.
-  return r.input + r.cacheRead + r.cacheWrite + r.output + (r.tool === "opencode" ? r.reasoning : 0);
+  // Some harnesses report reasoning separately; others include it in output.
+  return r.input + r.cacheRead + r.cacheWrite + r.output + (r.reasoningSeparate ? r.reasoning : 0);
+}
+
+// JSON.parse gives every record its own copy of repeated strings (titles,
+// models, paths). Re-share them on cache load so warm starts use roughly the
+// memory of a fresh parse.
+const INTERN_FIELDS = ["tool", "session", "title", "project", "workspace", "model"];
+function internRecords(entries) {
+  const pool = new Map();
+  const intern = (v) => {
+    if (typeof v !== "string") return v;
+    const hit = pool.get(v);
+    if (hit !== undefined) return hit;
+    pool.set(v, v);
+    return v;
+  };
+  for (const entry of entries) {
+    if (!entry || !Array.isArray(entry.records)) continue;
+    for (const r of entry.records) for (const f of INTERN_FIELDS) r[f] = intern(r[f]);
+  }
 }
 
 export function createCollector(opts = {}) {
+  const home = opts.home ?? os.homedir();
   const claudeCache = new Map(); // path -> { mtimeMs, size, records }
   const codexCache = new Map();
   let db = null; // single readOnly DatabaseSync for the life of the process
   let dbFailed = false;
+  let dbStatements = null;
   let prevOpencode = [];
 
   // Disk cache: warm starts stat files (fast) and re-parse only changed ones.
   // Bump CACHE_VERSION whenever record shape or parsers change.
-  const CACHE_VERSION = 3;
+  const CACHE_VERSION = 4;
   const cacheFile = opts.cacheFile ?? process.env.USAGE_CACHE ?? path.join(here, ".usage-cache.json");
   let cacheDirty = false;
   let lastSave = 0;
@@ -482,6 +517,7 @@ export function createCollector(opts = {}) {
     if (raw && raw.version === CACHE_VERSION && raw.files) {
       for (const [k, v] of Object.entries(raw.files.claude || {})) claudeCache.set(k, v);
       for (const [k, v] of Object.entries(raw.files.codex || {})) codexCache.set(k, v);
+      internRecords([...claudeCache.values(), ...codexCache.values()]);
     }
   } catch { /* cold start */ }
   const markDirty = () => { cacheDirty = true; };
@@ -490,7 +526,7 @@ export function createCollector(opts = {}) {
     const now = Date.now();
     if (!force && now - lastSave < 60_000) return false; // at most 1 write/min
     try {
-      fs.writeFileSync(
+      writeFileAtomic(
         cacheFile,
         JSON.stringify({
           version: CACHE_VERSION,
@@ -499,8 +535,7 @@ export function createCollector(opts = {}) {
             claude: Object.fromEntries(claudeCache),
             codex: Object.fromEntries(codexCache),
           },
-        }),
-        "utf8"
+        })
       );
     } catch {
       return false;
@@ -533,6 +568,7 @@ export function createCollector(opts = {}) {
 
   function collectOpencode() {
     const dbPath = path.join(home, ".local", "share", "opencode", "opencode.db");
+    if (!fs.existsSync(dbPath)) return prevOpencode;
     if (!db && !dbFailed) {
       try {
         db = new DatabaseSync(dbPath, { readOnly: true });
@@ -541,22 +577,21 @@ export function createCollector(opts = {}) {
         throw err;
       }
     }
+    if (!db) return prevOpencode;
     // v1 tables (message/session) and v2 tables (session_message/session_v2, written by opencode2).
-    let rows;
+    const prepare = (sql) => { try { return db.prepare(sql); } catch { return null; } };
+    // Prepared once; a missing table (older/newer OpenCode) leaves null and is
+    // retried only if the other version's table is absent too.
+    if (!dbStatements || (!dbStatements.v1 && !dbStatements.v2)) {
+      dbStatements = {
+        v1: prepare("SELECT m.id, m.session_id, m.time_created, m.data, s.title, s.directory, s.parent_id FROM message m JOIN session s ON s.id = m.session_id"),
+        v2: prepare("SELECT m.id, m.session_id, m.time_created, m.data, s.title, s.directory, s.parent_id FROM session_message m JOIN session_v2 s ON s.id = m.session_id WHERE m.type = 'assistant'"),
+      };
+    }
+    let rows = [];
     try {
-      rows = db
-        .prepare(
-          "SELECT m.id, m.session_id, m.time_created, m.data, s.title, s.directory, s.parent_id FROM message m JOIN session s ON s.id = m.session_id"
-        )
-        .all();
-      try {
-        rows.push(...db
-          .prepare(
-            "SELECT m.id, m.session_id, m.time_created, m.data, s.title, s.directory, s.parent_id FROM session_message m JOIN session_v2 s ON s.id = m.session_id WHERE m.type = 'assistant'"
-          )
-          .all());
-      } catch {
-        // older OpenCode: no v2 tables
+      for (const stmt of [dbStatements.v1, dbStatements.v2]) {
+        if (stmt) for (const row of stmt.all()) rows.push(row);
       }
     } catch (err) {
       if (err && (String(err.code || "").includes("SQLITE_BUSY") || String(err.message || "").includes("SQLITE_BUSY"))) {
@@ -594,8 +629,9 @@ export function createCollector(opts = {}) {
         reasoning,
         cost: typeof data.cost === "number" ? data.cost : null,
         sidechain: r.parent_id != null,
-        active: activeOf("opencode", { input, output, reasoning }),
+        active: activeOf({ input, output, reasoning, reasoningSeparate: true }),
         estimated: 0,
+        reasoningSeparate: 1,
       });
     }
     prevOpencode = records;
@@ -606,9 +642,22 @@ export function createCollector(opts = {}) {
     const byTool = {};
     const prof = process.env.COLLECT_PROFILE ? {} : null;
     const only = process.env.COLLECT_ONLY || "";
-    for (const [name, fn] of [["claude", collectClaude], ["codex", collectCodex], ["opencode", collectOpencode]]) {
+    // Harness extension point: register one normalized collector here.
+    const sources = [
+      { id: "claude", collect: collectClaude },
+      { id: "codex", collect: collectCodex },
+      { id: "opencode", collect: collectOpencode },
+    ];
+    const configured = opts.sources ?? process.env.TOKEN_GARDEN_SOURCES ?? "";
+    const enabled = new Set(
+      Array.isArray(configured) ? configured : String(configured).split(",").map((s) => s.trim()).filter(Boolean)
+    );
+    for (const { id: name, collect: fn } of sources) {
       try {
-        if (only && only !== name) { byTool[name] = []; continue; }
+        if ((only && only !== name) || (!only && enabled.size && !enabled.has(name))) {
+          byTool[name] = [];
+          continue;
+        }
         const t0 = prof ? Date.now() : 0;
         byTool[name] = fn();
         if (prof) prof[name] = Date.now() - t0;
@@ -618,30 +667,29 @@ export function createCollector(opts = {}) {
       }
     }
     if (prof) console.error(`profile: ${JSON.stringify(prof)}`);
-    const all = [...byTool.claude, ...byTool.codex, ...byTool.opencode];
+    const all = Object.values(byTool).flat();
     all.sort((a, b) => a.ts - b.ts);
     const rows = all.map((r) => FIELDS.map((f) => r[f] ?? null));
     flushCache(); // best-effort, throttled; serve also flushes on exit
-    return { generatedAt: Date.now(), fields: FIELDS, rows };
+    const activeSources = sources.map((s) => s.id).filter((id) => !only ? !enabled.size || enabled.has(id) : only === id);
+    // Price book: one resolved rate per distinct model seen, for UI tooltips.
+    // Small (models are few relative to records) and cheap — priceInfoFor is
+    // already memoized in prices.mjs.
+    const prices = {};
+    for (const r of all) {
+      if (!r.model || prices[r.model] !== undefined) continue;
+      prices[r.model] = priceInfoFor(r.model);
+    }
+    return { generatedAt: Date.now(), sources: activeSources, fields: FIELDS, rows, prices, priceMeta: priceMeta() };
   }
 
   return { collect, flush: () => flushCache(true) };
 }
 
 function summarize(payload, name) {
-  const ti = payload.fields.indexOf("tool");
-  const si = payload.fields.indexOf("session");
-  const ii = payload.fields.indexOf("input");
-  const cri = payload.fields.indexOf("cacheRead");
-  const cwi = payload.fields.indexOf("cacheWrite");
-  const oi = payload.fields.indexOf("output");
-  const ri = payload.fields.indexOf("reasoning");
-  const rows = payload.rows.filter((r) => r[ti] === name);
-  const sessions = new Set(rows.map((r) => name + ":" + r[si])).size;
-  const total = rows.reduce(
-    (a, r) => a + r[ii] + r[cri] + r[cwi] + r[oi] + (name === "opencode" ? r[ri] : 0),
-    0
-  );
+  const rows = expandPayload(payload).filter((r) => r.tool === name);
+  const sessions = new Set(rows.map((r) => name + ":" + r.session)).size;
+  const total = rows.reduce((sum, r) => sum + totalOf(r), 0);
   return `${name}: records=${rows.length} sessions=${sessions} totalTokens=${total}`;
 }
 
@@ -650,7 +698,8 @@ function expandPayload(payload) {
     const o = {};
     payload.fields.forEach((f, i) => (o[f] = r[i]));
     o.workspace ??= o.project ?? "unknown";
-    o.active ??= (o.input || 0) + (o.output || 0) + (o.tool === "opencode" ? o.reasoning || 0 : 0);
+    o.reasoningSeparate ??= o.tool === "opencode" ? 1 : 0; // old snapshot compatibility
+    o.active ??= activeOf(o);
     o.estimated ??= 0;
     return o;
   });
@@ -709,7 +758,7 @@ export function anonymizePayload(payload) {
     delete o._key;
     return FIELDS.map((f) => o[f] ?? null);
   });
-  return { generatedAt: payload.generatedAt, fields: FIELDS, rows, anonymized: true };
+  return { generatedAt: payload.generatedAt, sources: payload.sources, fields: FIELDS, rows, anonymized: true };
 }
 
 const invokedAsMain =
@@ -733,7 +782,7 @@ if (invokedAsMain) {
   }
   const main = async () => {
     if (has("refresh-prices")) {
-      const ok = await refreshPrices();
+      const ok = await refreshPrices({ force: true });
       console.error(`prices: refresh ${ok ? "ok" : "kept fallback"}`);
     }
     const collector = createCollector();
@@ -752,12 +801,16 @@ if (invokedAsMain) {
       if (dest) fs.writeFileSync(path.resolve(dest), text, "utf8");
       else process.stdout.write(text + "\n");
     } else {
-      for (const name of ["claude", "codex", "opencode"]) {
+      const names = payload.sources || [...new Set(expandPayload(payload).map((r) => r.tool))];
+      for (const name of names) {
         console.log(summarize(payload, name));
       }
-      fs.writeFileSync(outFile, `window.USAGE = ${JSON.stringify(payload)};`, "utf8");
+      writeFileAtomic(outFile, `window.USAGE = ${JSON.stringify(payload)};`);
       console.log(`wrote ${outFile} (${payload.rows.length} records)`);
     }
   };
-  main();
+  main().catch((err) => {
+    console.error(`error: ${err.message}`);
+    process.exitCode = 1;
+  });
 }

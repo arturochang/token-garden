@@ -5,7 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Token Garden</title>
 <!-- data.js loads dynamically below (static snapshots only); live mode uses /api/usage -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="./i18n/en.js"></script>
+<script src="./i18n/zh-Hant.js"></script>
+<script src="./crews/registry.js"></script>
+<script src="./crews/gnomes.js"></script>
 <style>
   :root, :root[data-theme="light"] {
     --bg: #ffffff; --fg: #1a1a1a; --muted: #666; --card: #f5f5f5;
@@ -22,30 +26,63 @@
     }
   }
   body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); margin: 0; padding: 16px; }
-  #topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-  #topbar h1 { font-size: 1.4rem; margin: 0; }
-  #gnomes { margin-left: auto; white-space: nowrap; }
-  #theme { white-space: nowrap; }
+  #topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  #topbar h1 { font-size: 2.3rem; font-weight: 800; letter-spacing: -0.5px; margin: 0; align-self: center; line-height: 1.1; }
+  #topbar #crew { margin-left: 12px; padding-top: 8px; }
+  /* Blanked heading takes no box; drop its flex gap and the crew's own
+     offset so the crew lines up flush left with the KPI tiles below. */
+  #topbar h1:empty { display: none; }
+  #topbar h1:empty + #crew { margin-left: 0; }
+  #top-controls { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #settings-open { white-space: nowrap; }
   #controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; position: sticky; top: 0; z-index: 50; background: var(--bg); padding: 8px 0; }
   #controls .group { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
   button { cursor: pointer; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--fg); }
   button.active { background: var(--fg); color: var(--bg); }
-  button.tool.on[data-tool="claude"] { background: #D97757; color: #fff; border-color: #D97757; }
-  button.tool.on[data-tool="codex"] { background: #10A37F; color: #fff; border-color: #10A37F; }
-  button.tool.on[data-tool="opencode"] { background: #6E56CF; color: #fff; border-color: #6E56CF; }
   input, select { padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--fg); }
   label { font-size: 0.85rem; }
-  #kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-bottom: 14px; }
+  dialog { color: var(--fg); background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 0; width: min(460px, calc(100vw - 32px)); box-shadow: 0 18px 60px rgba(0,0,0,.35); }
+  dialog::backdrop { background: rgba(0,0,0,.55); }
+  .settings-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .settings-head h2 { margin: 0; font-size: 1.05rem; }
+  .settings-body { display: grid; gap: 14px; padding: 16px; }
+  .setting-row { display: grid; grid-template-columns: minmax(90px, 34%) minmax(0,1fr); gap: 12px; align-items: center; }
+  .setting-row > span { color: var(--muted); font-size: .82rem; }
+  .setting-row:has(#tools) { align-items: start; }
+  .setting-row:has(#tools) > span { padding-top: 7px; } /* align with the first harness row, not the whole stack */
+  #tools { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .harness-option { display: flex; align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px; }
+  .harness-option.toggle-option { width: fit-content; }
+  .harness-option .dot { margin: 0; }
+  #kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 8px; margin-bottom: 14px; }
   .kpi { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
   .kpi .name { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; }
   .kpi .val { font-size: 1.25rem; font-weight: 700; }
   .kpi .delta { font-size: 0.75rem; }
   .delta.up { color: var(--up); } .delta.down { color: var(--down); } .delta.flat { color: var(--muted); }
-  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
-  @media (max-width: 900px) { .charts { grid-template-columns: 1fr; } }
-  .chart-box { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+  .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; min-width: 0; }
+  @media (max-width: 900px) { .charts { grid-template-columns: minmax(0, 1fr); } }
+  .chart-box { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; min-width: 0; max-width: 100%; overflow: hidden; }
   .chart-box h3 { margin: 0 0 6px; font-size: 0.9rem; }
-  .chart-box canvas { max-height: 260px; }
+  .chart-box h3 select.chart-opt { font-size: 0.75rem; font-weight: normal; padding: 1px 4px; margin-left: 4px; }
+  .chart-box canvas { max-height: 260px; max-width: 100%; width: 100% !important; height: auto !important; display: block; }
+  .chart-box[data-sec="heat"], .chart-box[data-sec="sessions"], .chart-box[data-sec="pricebook"] { overflow-x: auto; }
+  .pricemeta { font-size: 0.72rem; font-weight: normal; color: var(--muted); }
+  #pricebook table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  #pricebook th, #pricebook td { padding: 4px 8px; text-align: right; white-space: nowrap; }
+  #pricebook th:first-child, #pricebook td:first-child { text-align: left; }
+  #pricebook tbody tr { border-top: 1px solid var(--border); }
+  #pricebook .src { font-size: 0.72rem; color: var(--muted); }
+  #pricebook .src.live { color: var(--down); }
+  #controls input, #controls select { max-width: 100%; }
+  .picker summary { cursor: pointer; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--fg); list-style: none; font-size: 0.85rem; }
+  .picker summary::-webkit-details-marker { display: none; }
+  .picker summary::after { content: " ▾"; }
+  .picker[open] summary::after { content: " ▴"; }
+  .picker-menu { position: absolute; margin-top: 4px; padding: 8px; display: grid; gap: 4px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25); z-index: 60; min-width: 160px; }
+  .picker-menu label { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; white-space: nowrap; }
+  .picker-menu .picker-actions { display: flex; gap: 6px; margin-top: 4px; border-top: 1px solid var(--border); padding-top: 6px; }
+  .picker-menu .picker-actions button { flex: 1; font-size: 0.75rem; padding: 3px 6px; }
   #heatmap { display: grid; grid-template-columns: 40px repeat(24, minmax(10px, 26px)); justify-content: start; gap: 2px; font-size: 0.65rem; }
   #heatwrap { display: flex; gap: 18px; flex-wrap: wrap; align-items: start; }
   #rhythm { flex: 0 1 340px; min-width: 210px; font-size: 0.8rem; align-self: center; }
@@ -64,12 +101,18 @@
   #meta { color: var(--muted); font-size: 0.8rem; margin-bottom: 10px; }
   #live { margin-right: 10px; white-space: nowrap; }
   #live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
-  #crew { display: flex; gap: 8px; align-items: flex-end; margin-left: 8px; padding-top: 12px; }
+  #crew { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; padding-top: 4px; }
   #crew[hidden] { display: none; }
-  .gnome { width: 58px; text-align: center; cursor: pointer; position: relative; border-radius: 6px; }
-  .gnome svg { width: 40px; height: 40px; display: block; margin: 0 auto; overflow: visible; }
-  .gnome .tlabel { font-size: 0.6rem; color: var(--muted); line-height: 1.2; }
-  .gnome .rlabel { font-size: 0.65rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .gnome { display: flex; align-items: center; gap: 8px; width: auto; text-align: left; padding: 5px 12px 5px 7px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); cursor: pointer; position: relative; }
+  .gnome svg { width: 52px; height: 52px; display: block; margin: 0; overflow: visible; flex: none; }
+  .gnome .cinfo { display: flex; flex-direction: column; gap: 1px; }
+  .gnome .tlabel { font-size: 0.68rem; color: var(--muted); line-height: 1.2; }
+  .gnome .rlabel { font-size: 0.72rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  /* Crew faces: exactly one of .f-work/.f-idle/.f-frenzy shows per state. */
+  .gnome .f-idle, .gnome .f-frenzy { display: none; }
+  .gnome.idle .f-work, .gnome.off .f-work, .gnome.frenzy .f-work { display: none; }
+  .gnome.idle .f-idle, .gnome.off .f-idle { display: inline; }
+  .gnome.frenzy:not(.idle):not(.off) .f-frenzy { display: inline; }
   .gnome .bob { animation: gbob var(--spd, 1.2s) ease-in-out infinite; }
   .gnome .swing { animation: gswing var(--spd, 1.2s) ease-in-out infinite; transform-box: fill-box; transform-origin: 15% 85%; }
   @keyframes gbob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
@@ -81,45 +124,44 @@
   @keyframes zfloat { 0% { transform: translateY(2px); opacity: 0; } 30% { opacity: 1; } 100% { transform: translateY(-8px); opacity: 0; } }
   .gnome.off { opacity: 0.3; filter: grayscale(1); }
   .gnome.off .bob, .gnome.off .swing { animation-play-state: paused; }
-  .gnome .dust { display: none; position: absolute; bottom: 8px; left: 8px; width: 5px; height: 5px; border-radius: 50%; background: var(--muted); }
-  .gnome.frenzy .dust { display: block; animation: dpuff var(--spd, 0.5s) ease-out infinite; }
+  .gnome .dust { display: none; position: absolute; bottom: 8px; left: 8px; width: 5px; height: 5px; border-radius: 50%; background: var(--muted); }  .gnome.frenzy .dust { display: block; animation: dpuff var(--spd, 0.5s) ease-out infinite; }
   .gnome.frenzy .d2 { animation-delay: calc(var(--spd, 0.5s) / 2); }
   @keyframes dpuff { 0% { transform: translate(0, 0) scale(1); opacity: 0.8; } 100% { transform: translate(-14px, -4px) scale(0.3); opacity: 0; } }
   .gnome.frenzy .bob, .gnome.frenzy .swing { animation-timing-function: linear; }
-  .gnome .haul { display: flex; align-items: center; justify-content: center; gap: 4px; margin-top: 1px; min-height: 12px; }
+  .gnome .haul { display: flex; align-items: center; gap: 4px; margin: 0; min-height: 0; }
   .gnome .sack { color: #e0a100; line-height: 1; }
   .porter { display: inline-block; vertical-align: -2px; margin-right: 2px; }
-  .porter .ghead { width: 100%; height: auto; display: block; }  .gnome .cart { width: 22px; height: 5px; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+  .porter .ghead, .porter .ahead { width: 100%; height: auto; display: block; }  .gnome .cart { width: 22px; height: 5px; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
   .gnome .cart i { display: block; height: 100%; background: #4caf7d; }
   .kpi { position: relative; }
-  .kpi .name { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 22px; }
+  .kpi .name { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 30px; }
   .kpi .name .nametext { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .kpi .val { white-space: nowrap; }
-  .mascot { display: flex; align-items: center; height: 22px; flex: none; }
-  .mascot .ghead, .acct .ghead, .recep > .ghead, .lift .ghead { width: 22px; height: 22px; display: block; }
-  .wheel { position: relative; width: 24px; height: 24px; display: block; }
+  .mascot { display: flex; align-items: center; height: 30px; flex: none; overflow: visible; }
+  .mascot .ghead, .mascot .ahead, .acct .ghead, .acct .ahead, .recep > .ghead, .recep > .ahead, .lift .ghead, .lift .ahead { width: 30px; height: 30px; display: block; overflow: visible; flex: none; }
+  .wheel { position: relative; width: 28px; height: 28px; display: block; flex: none; }
   .wheel .rim { position: absolute; inset: 0; border: 2px dashed var(--muted); border-radius: 50%; animation: wspin var(--wspd, 0.8s) linear infinite; }
   @keyframes wspin { to { transform: rotate(360deg); } }
-  .wheel .ham { position: absolute; inset: 4px; animation: gbob var(--wspd, 0.8s) ease-in-out infinite; }
-  .wheel .ham .ghead { width: 100%; height: 100%; }
+  .wheel .ham { position: absolute; inset: 6px; animation: gbob var(--wspd, 0.8s) ease-in-out infinite; }
+  .wheel .ham .ghead, .wheel .ham .ahead { width: 100%; height: 100%; }
   .wheel .sweat { display: none; position: absolute; top: -2px; right: -3px; width: 4px; height: 6px; border-radius: 50%; background: #7cc4ff; }
   .wheel.pant .ham { animation-play-state: paused; transform: rotate(24deg); }
   .wheel.pant .rim { animation-duration: calc(var(--wspd, 0.8s) * 3); }
   .wheel.pant .sweat { display: block; animation: zfloat 1.6s ease-in-out infinite; }
-  .acct { position: relative; display: block; width: 24px; height: 24px; }
-  .acct .stmp { position: absolute; right: -2px; bottom: -2px; width: 12px; height: 12px; border-radius: 3px; background: #4caf7d; color: #fff; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; animation: stamp 2.4s ease-in-out infinite; }
+  .acct { position: relative; display: block; width: 30px; height: 30px; flex: none; }
+  .acct .stmp { position: absolute; right: -5px; bottom: 0px; width: 13px; height: 13px; border-radius: 3px; background: #4caf7d; color: #fff; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; animation: stamp 2.4s ease-in-out infinite; }
   .acct.audit .stmp { background: #e0a100; border-radius: 50%; }
   @keyframes stamp { 0%, 100% { transform: translateY(-3px) scale(1); } 12% { transform: translateY(1px) scale(1.25); } 24% { transform: translateY(-3px) scale(1); } }
-  .lift { display: flex; align-items: center; gap: 2px; }
+  .lift { display: flex; align-items: center; gap: 5px; }
   .lift .bar { position: relative; height: 4px; background: #9aa0a6; border-radius: 2px; animation: strain 0.9s ease-in-out infinite; }
   .lift .bar i { position: absolute; top: -3px; width: 3px; height: 10px; background: #9aa0a6; border-radius: 1px; }
   .lift .bar i:first-child { left: 0; } .lift .bar i:last-child { right: 0; }
   @keyframes strain { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.5px); } }
   .recep { position: relative; display: block; }
-  .recep .wave { position: absolute; top: 2px; right: -4px; width: 5px; height: 9px; border-radius: 3px; background: #f2c9a0; transform-origin: bottom center; animation: wavehi 1.2s ease-in-out infinite; }
+  .recep .wave { position: absolute; top: 3px; right: -5px; width: 5px; height: 9px; border-radius: 3px; background: #f2c9a0; transform-origin: bottom center; animation: wavehi 1.2s ease-in-out infinite; }
   @keyframes wavehi { 0%, 100% { transform: rotate(-25deg); } 50% { transform: rotate(30deg); } }
-  .recep .guest { position: absolute; left: -8px; bottom: -2px; width: 12px; height: 12px; animation: guestpop 0.5s ease-out; }
-  .recep .guest .ghead { width: 100%; height: 100%; }
+  .recep .guest { position: absolute; left: -11px; bottom: -4px; width: 15px; height: 15px; animation: guestpop 0.5s ease-out; }
+  .recep .guest .ghead, .recep .guest .ahead { width: 100%; height: 100%; }
   @keyframes guestpop { 0% { transform: translateY(8px) scale(0.4); opacity: 0; } 100% { transform: none; opacity: 1; } }
   .pflag { display: inline-block; vertical-align: -2px; animation: flagwave 2s ease-in-out infinite; transform-origin: left center; }
   @keyframes flagwave { 0%, 100% { transform: skewX(0); } 50% { transform: skewX(-8deg); } }
@@ -139,13 +181,13 @@
   .courier svg { width: 100%; height: 100%; }
   .courier.fresh svg { animation: guestpop 0.5s ease-out; }
   #subbaby { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; margin-left: 2px; }
-  #subbaby .ghead { width: 100%; height: 100%; }
+  #subbaby .ghead, #subbaby .ahead { width: 100%; height: 100%; }
   #sub:not(:checked) ~ #subbaby { opacity: 0.15; filter: grayscale(1); }
   .clerk { display: none; width: 18px; height: 18px; vertical-align: -3px; margin-left: 4px; }
   .clerk svg { width: 100%; height: 100%; }
   body.custom-range .clerk { display: inline-block; }
   .merch { position: relative; display: block; }
-  .merch .tag { position: absolute; right: -4px; bottom: -2px; background: #e0a100; color: #111; font-size: 8px; font-weight: 700; border-radius: 2px; padding: 0 2px; }
+  .merch .tag { position: absolute; right: -7px; bottom: 0px; background: #e0a100; color: #111; font-size: 8px; font-weight: 700; border-radius: 2px; padding: 0 2px; }
   .merch.faint { transform: rotate(25deg); filter: saturate(0.4); }
   .bucket svg { width: 18px; height: 18px; display: block; }
   .bucket.full svg { animation: slosh 1.4s ease-in-out infinite; transform-origin: top center; }
@@ -153,23 +195,49 @@
   #mtdglass svg { width: 11px; height: 16px; vertical-align: -3px; }
   .shrug { width: 26px; height: 26px; vertical-align: middle; margin-right: 6px; }
   .wrestle { display: inline-flex; align-items: center; margin-left: 6px; vertical-align: -3px; }
-  .wrestle .ghead { width: 16px; height: 16px; }
-  .wrestle .ghead:first-of-type { transform: rotate(-12deg); animation: strain 0.9s ease-in-out infinite; }
-  .wrestle .ghead:last-of-type { transform: rotate(12deg); animation: strain 0.9s ease-in-out infinite reverse; }
+  .wrestle .ghead, .wrestle .ahead { width: 19px; height: 19px; }
+  .wrestle .ghead:first-of-type, .wrestle .ahead:first-of-type { transform: rotate(-12deg); animation: strain 0.9s ease-in-out infinite; }
+  .wrestle .ghead:last-of-type, .wrestle .ahead:last-of-type { transform: rotate(12deg); animation: strain 0.9s ease-in-out infinite reverse; }
   .wrestle .vs { font-size: 0.6rem; color: var(--muted); margin: 0 2px; }
   .spark { width: 100%; height: 18px; display: block; margin: 2px 0 6px; opacity: 0.85; }
   .fold { padding: 0 6px; margin-right: 6px; font-size: 0.75rem; }
+  /* Page pet: a crew-owned buddy roaming the bottom of the viewport. */
+  #pagepet { position: fixed; left: 0; bottom: 8px; z-index: 150; width: 140px; height: 146px; pointer-events: auto; cursor: pointer; }
+  #pagepet #petfig { display: block; width: 140px; height: 146px; }
+  #pagepet #petfig svg { width: 100%; height: 100%; overflow: visible; }
+  #pagepet .pzzz { display: none; position: absolute; top: -10px; right: 10px; font-size: 0.8rem; font-weight: 700; color: var(--muted); animation: zfloat 2.2s ease-in-out infinite; }
+  #pagepet[data-mode="nap"] .pzzz { display: block; }
+  #pagepet[data-mode="nap"] #petfig { animation: petbreathe 2.4s ease-in-out infinite; transform-origin: bottom center; }
+  @keyframes petbreathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04, 0.97); } }
+  #petbubble { position: absolute; bottom: 148px; left: 50%; transform: translateX(-50%); background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 2px 8px; font-size: 0.75rem; white-space: nowrap; }
+  #petbubble[hidden] { display: none; }
   .chart-box.shut > :not(h3) { display: none; }
   body.napping *, body.napping *::before, body.napping *::after { animation-play-state: paused !important; }
   body.nognomes .mascot, body.nognomes .porter, body.nognomes .pflag, body.nognomes .fisher,
   body.nognomes .clerk, body.nognomes #subbaby, body.nognomes #lookout, body.nognomes #courier,
-  body.nognomes #mtdglass, body.nognomes .wrestle, body.nognomes .shrug { display: none !important; }
+  body.nognomes #mtdglass, body.nognomes .wrestle, body.nognomes .shrug,
+  body.nognomes #pagepet { display: none !important; }
   @media (prefers-reduced-motion: reduce) { .gnome .bob, .gnome .swing, .gnome .dust, .gnome.idle .zzz, .wheel .rim, .wheel .ham, .acct .stmp, .lift .bar, .recep .wave, .pflag, .lookout.scope svg, .courier.fresh svg, .bucket.full svg { animation: none; } }
 </style>
 </head>
 <body>
-<div id="topbar"><h1>Token Garden</h1><div id="crew" title="Gnome work speed follows active tokens/sec per tool"></div><button id="gnomes" title="Toggle garden gnome crew">gnomes: on</button><button id="theme" title="Cycle color theme">theme: auto</button></div>
-<div id="nousage" hidden>Run <code>npm run usage</code> first.</div>
+<div id="topbar"><h1 id="pageheading">Token Garden</h1><div id="crew" title="Crew work speed follows active tokens/sec per tool"></div><div id="top-controls"><button id="settings-open" type="button" data-k="settings">Settings</button></div></div>
+<dialog id="settings-dialog" aria-labelledby="settings-title">
+  <div class="settings-head"><h2 id="settings-title" data-k="settings">Settings</h2><button id="settings-close" type="button" aria-label="Close">×</button></div>
+  <div class="settings-body">
+    <label class="setting-row"><span data-k="theme">Theme</span><select id="theme"><option value="auto" data-k="theme_auto">Auto</option><option value="dark" data-k="theme_dark">Dark</option><option value="light" data-k="theme_light">Light</option></select></label>
+    <label class="setting-row"><span data-k="language">Language</span><select id="lang"><option value="en">English</option><option value="zh-Hant">繁體中文</option></select></label>
+    <label class="setting-row"><span data-k="style_label">Crew style</span><select id="crewstyle"><option value="gnomes" data-k="crew_gnomes">gnomes</option></select></label>
+    <label class="setting-row"><span data-k="crew_visible">Show crew</span><span class="harness-option toggle-option"><input type="checkbox" id="gnomes" checked></span></label>
+    <div class="setting-row"><span data-k="harnesses">Harnesses</span><div id="tools"></div></div>
+    <label class="setting-row"><span data-k="sub">Include subagents</span><span><input type="checkbox" id="sub" checked> <span id="subbaby" title="Baby handles subagent records — ghosts when excluded"></span></span></label>
+    <label class="setting-row"><span data-k="hide_heading">Hide heading</span><span class="harness-option toggle-option"><input type="checkbox" id="hideheading"></span></label>
+    <label class="setting-row"><span data-k="heading_text">Heading text</span><input type="text" id="headingtext" maxlength="60" placeholder="Token Garden"></label>
+    <label class="setting-row"><span data-k="tabtitle_text">Tab title</span><input type="text" id="tabtitletext" maxlength="60" placeholder="Token Garden"></label>
+  </div>
+</dialog>
+<div id="pagepet" data-mode="sit" title="Page pet: click to say hi"><div id="petbubble" hidden></div><span id="petfig"></span><span class="pzzz">z</span></div>
+<div id="nousage" hidden><span data-k="nousage">Run <code>npm run usage</code> first.</span></div>
 <div id="app" hidden>
   <div id="meta"><span id="live"><span id="lookout"></span><span id="live-dot"></span><span id="live-text"></span></span><span id="meta-text"></span><span id="courier"></span></div>
   <div id="controls">
@@ -177,57 +245,115 @@
       <button data-range="1h">1h</button>
       <button data-range="3h">3h</button>
       <button data-range="6h">6h</button>
-      <button data-range="today">Today</button>
+      <button data-range="today" data-k="today">Today</button>
       <button data-range="7d">7d</button>
       <button data-range="30d" class="active">30d</button>
       <button data-range="90d">90d</button>
-      <button data-range="all">All</button>
+      <button data-range="all" data-k="all">All</button>
     </div>
     <div class="group">
-      <label>from <input type="date" id="from"></label>
-      <label>to <input type="date" id="to"><span class="clerk" title="Custom-range clerk on duty"></span></label>
-    </div>
-    <div class="group" id="tools">
-      <button class="tool on" data-tool="claude">claude</button>
-      <button class="tool on" data-tool="codex">codex</button>
-      <button class="tool on" data-tool="opencode">opencode</button>
+      <label><span data-k="from">from</span> <input type="date" id="from"></label>
+      <label><span data-k="to">to</span> <input type="date" id="to"><span class="clerk" title="Custom-range clerk on duty"></span></label>
     </div>
     <div class="group">
-      <label>project <select id="project"><option value="">All</option></select></label>
+      <label><span data-k="project">project</span> <select id="project"><option value="">All</option></select></label>
     </div>
     <div class="group">
-      <label>group by <select id="group">
-        <option value="model">model</option>
-        <option value="project">project</option>
-        <option value="workspace">workspace</option>
-        <option value="tool+model">tool+model</option>
-        <option value="workspace+model">workspace+model</option>
-      </select></label>
-    </div>
-    <div class="group">
-      <label><input type="checkbox" id="sub" checked> Include subagents <span id="subbaby" title="Baby handles subagent records — ghosts when excluded"></span></label>
+      <details id="tiles-picker" class="picker">
+        <summary data-k="tiles">Tiles</summary>
+        <div id="tiles-menu" class="picker-menu"></div>
+      </details>
     </div>
   </div>
   <div id="kpis"></div>
   <div class="charts">
-    <div class="chart-box" data-sec="tokens"><h3>Tokens over time <button id="logt" title="Toggle log scale">log</button> <button id="prevt" title="Toggle previous-period overlay">prev</button></h3><canvas id="c-tokens"></canvas></div>
-    <div class="chart-box" data-sec="cost"><h3>Cost over time <button id="logc" title="Toggle log scale">log</button> <button id="prevc" title="Toggle previous-period overlay">prev</button></h3><canvas id="c-cost"></canvas></div>
-    <div class="chart-box" data-sec="mix"><h3>Token mix by tool <button id="mixpct" title="Toggle absolute / percent stacked">%</button></h3><canvas id="c-mix"></canvas></div>
-    <div class="chart-box" data-sec="models"><h3 id="group-title">Top models</h3><canvas id="c-models"></canvas></div>
-    <div class="chart-box" data-sec="costmodels"><h3>Top cost by model</h3><canvas id="c-costmodels"></canvas></div>
-    <div class="chart-box" data-sec="mtd"><h3>Spend month-to-date <span id="mtdglass"></span></h3><canvas id="c-mtd"></canvas></div>
-    <div class="chart-box" data-sec="hit"><h3>Cache hit rate trend</h3><canvas id="c-hit"></canvas></div>
-    <div class="chart-box" data-sec="topsess"><h3>Most expensive sessions</h3><div id="topsess"></div></div>
+    <div class="chart-box" data-sec="tokens"><h3><span class="t" data-k="c_tokens">Tokens over time</span> <button id="logt" title="Toggle log scale">log</button> <button id="prevt" title="Toggle previous-period overlay">prev</button></h3><canvas id="c-tokens"></canvas></div>
+    <div class="chart-box" data-sec="cost"><h3><span class="t" data-k="c_cost">Cost over time</span> <button id="logc" title="Toggle log scale">log</button> <button id="prevc" title="Toggle previous-period overlay">prev</button></h3><canvas id="c-cost"></canvas></div>
+    <div class="chart-box" data-sec="mix"><h3><span class="t" data-k="c_mix">Token mix by tool</span> <button id="mixpct" title="Toggle absolute / percent stacked">%</button></h3><canvas id="c-mix"></canvas></div>
+    <div class="chart-box" data-sec="models"><h3><span class="t" id="group-title" data-k="g_top_model">Top models</span> <select id="group" class="chart-opt">
+        <option value="model" data-k="g_model">model</option>
+        <option value="project" data-k="g_project">project</option>
+        <option value="workspace" data-k="g_workspace">workspace</option>
+        <option value="tool+model" data-k="g_toolmodel">tool+model</option>
+        <option value="workspace+model" data-k="g_wmodel">workspace+model</option>
+      </select></h3><canvas id="c-models"></canvas></div>
+    <div class="chart-box" data-sec="costmodels"><h3><span class="t" data-k="c_costmodels">Top cost by model</span></h3><canvas id="c-costmodels"></canvas></div>
+    <div class="chart-box" data-sec="mtd"><h3><span class="t" data-k="c_mtd">Spend month-to-date</span> <span id="mtdglass"></span></h3><canvas id="c-mtd"></canvas></div>
+    <div class="chart-box" data-sec="hit"><h3><span class="t" data-k="c_hit">Cache hit rate trend</span></h3><canvas id="c-hit"></canvas></div>
+    <div class="chart-box" data-sec="topsess"><h3><span class="t" data-k="c_topsess">Most expensive sessions</span></h3><div id="topsess"></div></div>
   </div>
-  <div class="chart-box" data-sec="heat" style="margin-bottom:14px"><h3>Activity heatmap — trailing 28d (day × hour) <select id="metric" style="font-size:0.8rem;font-weight:normal"><option value="tokens">tokens</option><option value="active">active</option><option value="cost">cost</option></select></h3><div id="heatwrap"><div id="heatmap"></div><div id="rhythm"></div></div></div>
-  <div class="chart-box" data-sec="sessions"><h3>Sessions</h3>
+  <div class="chart-box" data-sec="heat" style="margin-bottom:14px"><h3><span class="t" data-k="c_heat">Activity heatmap — trailing 28d (day × hour)</span> <select id="metric" style="font-size:0.8rem;font-weight:normal"><option value="tokens" data-k="m_tokens">tokens</option><option value="active" data-k="m_active">active</option><option value="cost" data-k="m_cost">cost</option></select></h3><div id="heatwrap"><div id="heatmap"></div><div id="rhythm"></div></div></div>
+  <div class="chart-box" data-sec="sessions"><h3><span class="t" data-k="c_sess">Sessions</span></h3>
     <table id="sessions"><thead><tr></tr></thead><tbody></tbody></table>
-    <button id="more" style="margin-top:8px">show more</button>
+    <button id="more" style="margin-top:8px" data-k="more">show more</button>
+  </div>
+  <div class="chart-box" data-sec="pricebook"><h3><span class="t" data-k="c_pricebook">Price book</span> <span id="pricemeta" class="pricemeta"></span></h3>
+    <div id="pricebook"></div>
   </div>
 </div>
 <script>
-const COLORS = { claude: "#D97757", codex: "#10A37F", opencode: "#6E56CF" };
-const TOOLS = ["claude", "codex", "opencode"];
+// Harness UI extension point: add one stable lowercase id and color here.
+const TOOL_CONFIG = {
+  claude: { label: "claude", color: "#D97757" },
+  codex: { label: "codex", color: "#10A37F" },
+  opencode: { label: "opencode", color: "#6E56CF" },
+};
+const TOOLS = Object.keys(TOOL_CONFIG);
+const COLORS = Object.fromEntries(TOOLS.map((id) => [id, TOOL_CONFIG[id].color]));
+
+// KPI tile ids, in display order. Each maps to a "k_<id>" i18n key used both
+// as the tile heading and as the label in the tile-visibility picker.
+const KPI_IDS = ["total", "active", "burn", "input", "cread", "cwrite", "output", "hit", "cost", "cov", "sess", "avg"];
+
+// i18n: per-locale dictionaries live in i18n/<tag>.js (loaded via <script>
+// tags above so both file:// snapshots and the live server work without
+// fetch/CORS issues). To add a language: copy i18n/en.js, translate values
+// (keys stay), add the tag to LOCALES + a <script> line. Units (k/M/B, $,
+// m/h/d, tokens/s) stay English in all locales.
+const LOCALES = ["en", "zh-Hant"];
+const STRINGS = window.STRINGS || { en: {} };
+// t("key", { n: 3 }) fills {n}-style placeholders in the localized string.
+function t(key, vars) {
+  const lang = LOCALES.includes(state.lang) ? state.lang : "en";
+  const s = (STRINGS[lang] && STRINGS[lang][key]) ?? STRINGS.en[key] ?? key;
+  return vars ? s.replace(/\{(\w+)\}/g, (m, k) => (vars[k] ?? m)) : s;
+}
+// Log content includes user prompts and filesystem-derived names. Escape it
+// before inserting it into HTML, even though the dashboard is local-only.
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[ch]);
+}
+// Locale for date/time rendering only; numeric/unit formatting stays English.
+function localeTag() { return state.lang === "zh-Hant" ? "zh-Hant-TW" : "en"; }
+function detectLang() {
+  try {
+    const n = (navigator.language || "").toLowerCase().replace("_", "-");
+    if (/^zh(-|_)?(hant|tw|hk|mo)/.test(n) || n === "zh-hant") return "zh-Hant";
+  } catch { /* ignore */ }
+  return "en";
+}
+// Push every static (data-k) string + titles to match state.lang.
+function applyLang() {
+  document.documentElement.lang = state.lang === "zh-Hant" ? "zh-Hant" : "en";
+  document.querySelectorAll("[data-k]").forEach((el) => {
+    if (el.id === "group-title") return; // dynamic per group-by; renderModels owns it
+    const v = t(el.dataset.k);
+    if (el.tagName === "OPTION" && el.value === "" && el.closest("#project")) { el.textContent = t("all"); return; }
+    el.innerHTML = v;
+  });
+  const setTitle = (id, key) => { const el = document.getElementById(id); if (el) el.title = t(key); };
+  setTitle("gnomes", "tip_gnomes"); setTitle("crewstyle", "tip_crewstyle"); setTitle("theme", "tip_theme"); setTitle("crew", "tip_crew");
+  setTitle("subbaby", "tip_subbaby"); setTitle("logt", "tip_log"); setTitle("logc", "tip_log");
+  setTitle("prevt", "tip_prev"); setTitle("prevc", "tip_prev"); setTitle("mixpct", "tip_mix");
+  setTitle("group", "groupby"); { const g = document.getElementById("group"); if (g) g.setAttribute("aria-label", t("groupby")); }
+  document.querySelectorAll(".clerk").forEach((el) => { el.title = t("tip_clerk"); });
+  document.querySelectorAll(".fold").forEach((el) => { el.title = t("tip_fold"); });
+  const ls = document.getElementById("lang");
+  if (ls) ls.value = state.lang;
+  refreshGnomeBtn(); refreshCrewBtn(); applyTheme(); tickLive();
+}
 
 // String pool: session/title/project/model/workspace/tool repeat across
 // ~43k records but only ~1k distinct values. Sharing one reference each
@@ -250,7 +376,8 @@ function expand() {
       if (typeof o[f] === "string") o[f] = intern(o[f]);
     }
     o.workspace ??= o.project ?? "unknown";
-    o.active ??= (o.input || 0) + (o.output || 0) + (o.tool === "opencode" ? o.reasoning || 0 : 0);
+    o.reasoningSeparate ??= o.tool === "opencode" ? 1 : 0; // old snapshot compatibility
+    o.active ??= (o.input || 0) + (o.output || 0) + (o.reasoningSeparate ? o.reasoning || 0 : 0);
     o.estimated ??= 0;
     return o;
   });
@@ -266,8 +393,43 @@ function fmt(n) {
   return String(Math.round(n * 10) / 10);
 }
 function money(n) { return n == null ? "—" : "$" + n.toFixed(2); }
+
+// Price book lookup + tooltip text, shared by every spot a model name is
+// rendered (charts, tables, the merchant tile, the Price book section).
+// window.USAGE.prices is a one-entry-per-distinct-model map built server
+// side in collect.mjs; older data.js snapshots simply lack it.
+function priceInfo(model) {
+  const book = window.USAGE && window.USAGE.prices;
+  return (book && book[model]) || null;
+}
+function priceAge(fetchedAt) {
+  if (!fetchedAt) return "";
+  const mins = Math.max(0, Math.round((Date.now() - fetchedAt) / 60000));
+  if (mins < 60) return mins + "m";
+  const hrs = Math.round(mins / 60);
+  return hrs + "h";
+}
+// One-line tooltip: rates per 1M tokens, plus source (live LiteLLM snapshot,
+// age-stamped, vs. the built-in fallback table) so a number can be trusted
+// or distrusted at a glance.
+function priceTip(model) {
+  const info = priceInfo(model);
+  const meta = (window.USAGE && window.USAGE.priceMeta) || {};
+  if (!info) {
+    return t("price_none", { model });
+  }
+  const p = info.price;
+  const rates = state.lang === "zh-Hant"
+    ? `輸入 ${money(p.input)}／輸出 ${money(p.output)}／快取讀 ${money(p.cacheRead)}／快取寫 ${money(p.cacheWrite)}（每 1M token）`
+    : `${money(p.input)} in / ${money(p.output)} out / ${money(p.cacheRead)} cache-read / ${money(p.cacheWrite)} cache-write per 1M`;
+  const age = priceAge(meta.fetchedAt);
+  const source = info.live
+    ? (age ? t("price_src_live_age", { age }) : t("price_src_live"))
+    : t("price_src_builtin");
+  return `${model}\n${rates}\n${source}`;
+}
 function totalOf(r) {
-  return r.input + r.cacheRead + r.cacheWrite + r.output + (r.tool === "opencode" ? r.reasoning : 0);
+  return r.input + r.cacheRead + r.cacheWrite + r.output + (r.reasoningSeparate ? r.reasoning : 0);
 }
 function dur(ms) {
   if (ms <= 0) return "—";
@@ -279,8 +441,10 @@ function dur(ms) {
 }
 
 const state = {
+  lang: "en",
   preset: "30d",
   tools: new Set(TOOLS),
+  kpis: new Set(KPI_IDS),
   project: "",
   group: "model",
   metric: "tokens",
@@ -290,20 +454,27 @@ const state = {
   prevT: true,
   prevC: true,
   gnomes: true,
+  crewStyle: "gnomes",
   collapsed: [],
   includeSub: true,
   sortKey: "total",
   sortDir: -1,
   shown: 50,
+  headingText: "",
+  hideHeading: false,
+  tabTitleText: "",
 };
+const DEFAULT_TITLE = "Token Garden";
 
 const LS_KEY = "usage-state-v1";
 function saveState() {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify({
       updatedAt: Date.now(),
+      lang: state.lang,
       preset: state.preset,
       tools: [...state.tools],
+      kpis: [...state.kpis],
       project: state.project,
       group: state.group,
       metric: state.metric,
@@ -313,10 +484,14 @@ function saveState() {
       prevT: state.prevT,
       prevC: state.prevC,
       gnomes: state.gnomes,
+      crewStyle: state.crewStyle,
       collapsed: state.collapsed,
       includeSub: state.includeSub,
       sortKey: state.sortKey,
       sortDir: state.sortDir,
+      headingText: state.headingText,
+      hideHeading: state.hideHeading,
+      tabTitleText: state.tabTitleText,
       from: document.getElementById("from")?.value || "",
       to: document.getElementById("to")?.value || "",
     }));
@@ -351,6 +526,7 @@ async function pullPrefs() {
       if (applyPrefs(p)) {
         try { localStorage.setItem(LS_KEY, JSON.stringify(p)); } catch { /* ignore */ }
         syncControls();
+        applyLang();
         rerender();
       }
     }
@@ -359,12 +535,15 @@ async function pullPrefs() {
 function loadState() {
   let s = null;
   try { s = JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch { s = null; }
-  applyPrefs(s);
+  if (!applyPrefs(s)) state.lang = detectLang();
+  else if (!s.lang) state.lang = detectLang(); // existing saves predate i18n
 }
 function applyPrefs(s) {
   if (!s || typeof s !== "object") return false;
+  if (typeof s.lang === "string" && LOCALES.includes(s.lang)) state.lang = s.lang;
   if (typeof s.preset === "string") state.preset = s.preset;
-  if (Array.isArray(s.tools) && s.tools.length) state.tools = new Set(s.tools.filter((t) => TOOLS.includes(t)));
+  if (Array.isArray(s.tools)) state.tools = new Set(s.tools.filter((t) => TOOLS.includes(t)));
+  if (Array.isArray(s.kpis)) state.kpis = new Set(s.kpis.filter((k) => KPI_IDS.includes(k)));
   if (typeof s.project === "string") state.project = s.project;
   if (typeof s.group === "string") state.group = s.group;
   if (typeof s.metric === "string" && ["tokens", "active", "cost"].includes(s.metric)) state.metric = s.metric;
@@ -374,10 +553,16 @@ function applyPrefs(s) {
   if (typeof s.prevT === "boolean") state.prevT = s.prevT;
   if (typeof s.prevC === "boolean") state.prevC = s.prevC;
   if (typeof s.gnomes === "boolean") state.gnomes = s.gnomes;
+  if (typeof s.crewStyle === "string") {
+    if (window.CREWS && window.CREWS[s.crewStyle]) state.crewStyle = s.crewStyle;
+  }
   if (Array.isArray(s.collapsed)) state.collapsed = s.collapsed.filter((x) => typeof x === "string");
   if (typeof s.includeSub === "boolean") state.includeSub = s.includeSub;
   if (typeof s.sortKey === "string") state.sortKey = s.sortKey;
   if (s.sortDir === 1 || s.sortDir === -1) state.sortDir = s.sortDir;
+  if (typeof s.headingText === "string") state.headingText = s.headingText.slice(0, 60);
+  if (typeof s.hideHeading === "boolean") state.hideHeading = s.hideHeading;
+  if (typeof s.tabTitleText === "string") state.tabTitleText = s.tabTitleText.slice(0, 60);
   state._from = s.from || "";
   state._to = s.to || "";
   return true;
@@ -399,7 +584,8 @@ function applyTheme() {
   const t = themePref();
   if (t === "auto") document.documentElement.removeAttribute("data-theme");
   else document.documentElement.setAttribute("data-theme", t);
-  document.getElementById("theme").textContent = "theme: " + t;
+  const select = document.getElementById("theme");
+  if (select) select.value = t;
   if (window.Chart) {
     const dark = isDark();
     Chart.defaults.color = dark ? "#9a9aa3" : "#666";
@@ -413,6 +599,31 @@ function applyTheme() {
     for (const c of Object.values(charts)) c.update("none");
   }
 }
+function refreshGnomeBtn() {
+  const gbtn = document.getElementById("gnomes");
+  if (gbtn) gbtn.checked = state.gnomes;
+}
+function refreshCrewBtn() {
+  const cbtn = document.getElementById("crewstyle");
+  if (!cbtn || !window.CREWS) return;
+  const ids = Object.keys(window.CREWS);
+  if (!ids.includes(state.crewStyle)) state.crewStyle = ids.includes("gnomes") ? "gnomes" : ids[0];
+  const existing = [...cbtn.options].map((o) => o.value);
+  if (existing.join("\0") !== ids.join("\0")) {
+    cbtn.replaceChildren(...ids.map((id) => {
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = window.CREWS[id].displayName;
+      return option;
+    }));
+  }
+  cbtn.value = state.crewStyle;
+}
+window.addEventListener("crewregistered", refreshCrewBtn);
+function crewFig(tool) {
+  // Thin dispatcher: figures live in crews/<id>.js as def.fig.
+  return crewDef(state.crewStyle).fig(tool);
+}
 function gridColor() {
   return isDark() ? "#333" : "#ddd";
 }
@@ -420,16 +631,21 @@ function gridColor() {
 let ALL = [];
 function setMeta() {
   const est = ALL.filter((r) => r.estimated).length;
+  const gen = window.USAGE ? new Date(window.USAGE.generatedAt).toLocaleString(localeTag()) : "—";
   document.getElementById("meta-text").textContent =
-    ALL.length + " records" + (est ? ` (incl. ${est} estimated)` : "") + " · generated " +
-    (window.USAGE ? new Date(window.USAGE.generatedAt).toLocaleString() : "—");
+    `${ALL.length} ${t("meta_records")}` +
+    (est ? t("meta_est", { n: est }) : "") +
+    ` · ${t("meta_gen")} ` + gen;
 }
 function refreshProjects() {
   const sel = document.getElementById("project");
   const projects = [...new Set(ALL.map((r) => r.project))].sort();
   const have = [...sel.options].map((o) => o.value);
   if (have.length === projects.length + 1 && projects.every((p) => have.includes(p))) return;
-  sel.innerHTML = '<option value="">All</option>';
+  sel.innerHTML = '';
+  const all = document.createElement("option");
+  all.value = ""; all.textContent = t("all");
+  sel.appendChild(all);
   for (const p of projects) {
     const o = document.createElement("option");
     o.value = p; o.textContent = p;
@@ -440,24 +656,108 @@ function refreshProjects() {
 // Push every control widget to match state (boot + server-prefs arrival).
 function syncControls() {
   refreshProjects();
+  const ls = document.getElementById("lang");
+  if (ls) ls.value = state.lang;
   document.getElementById("project").value = state.project || "";
   if (state._from) document.getElementById("from").value = state._from;
   if (state._to) document.getElementById("to").value = state._to;
   document.querySelectorAll("#presets button").forEach((b) =>
     b.classList.toggle("active", b.dataset.range === state.preset));
-  document.querySelectorAll("#tools button").forEach((b) =>
-    b.classList.toggle("on", state.tools.has(b.dataset.tool)));
+  document.querySelectorAll("#tools input[data-tool]").forEach((input) =>
+    (input.checked = state.tools.has(input.dataset.tool)));
+  document.querySelectorAll("#tiles-menu input[data-kpi]").forEach((input) =>
+    (input.checked = state.kpis.has(input.dataset.kpi)));
   document.getElementById("sub").checked = state.includeSub;
   const gsel = document.getElementById("group");
   if (gsel) gsel.value = state.group;
   const msel = document.getElementById("metric");
   if (msel) msel.value = state.metric;
+  const hh = document.getElementById("hideheading");
+  if (hh) hh.checked = state.hideHeading;
+  const ht = document.getElementById("headingtext");
+  if (ht) ht.value = state.headingText;
+  const ttt = document.getElementById("tabtitletext");
+  if (ttt) ttt.value = state.tabTitleText;
+  applyTitles();
+}
+
+// Two independent overrides: the on-page H1 and the browser tab title.
+// Hiding the heading blanks it outright (a bare topbar, crew + settings
+// button only). The tab title has no hide option — browser tabs read a
+// blank title as broken, not intentional — so it only ever renames.
+function applyTitles() {
+  const heading = document.getElementById("pageheading");
+  if (heading) heading.textContent = state.hideHeading ? "" : (state.headingText || DEFAULT_TITLE);
+  document.title = state.tabTitleText || DEFAULT_TITLE;
+}
+
+function buildTileControls() {
+  const wrap = document.getElementById("tiles-menu");
+  if (!wrap) return;
+  const boxes = KPI_IDS.map((id) => {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.dataset.kpi = id;
+    const text = document.createElement("span");
+    text.dataset.k = "k_" + id;
+    text.textContent = t("k_" + id);
+    label.append(input, text);
+    return label;
+  });
+  const actions = document.createElement("div");
+  actions.className = "picker-actions";
+  const allBtn = document.createElement("button");
+  allBtn.type = "button";
+  allBtn.dataset.k = "all";
+  allBtn.textContent = t("all");
+  allBtn.addEventListener("click", () => {
+    state.kpis = new Set(KPI_IDS);
+    saveState(); syncControls(); render();
+  });
+  const noneBtn = document.createElement("button");
+  noneBtn.type = "button";
+  noneBtn.dataset.k = "none";
+  noneBtn.textContent = t("none");
+  noneBtn.addEventListener("click", () => {
+    state.kpis = new Set();
+    saveState(); syncControls(); render();
+  });
+  actions.append(allBtn, noneBtn);
+  wrap.replaceChildren(...boxes, actions);
+}
+
+function buildToolControls() {
+  const wrap = document.getElementById("tools");
+  if (!wrap) return;
+  wrap.replaceChildren(...TOOLS.map((id) => {
+    const label = document.createElement("label");
+    label.className = "harness-option";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.dataset.tool = id;
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.style.background = COLORS[id];
+    const text = document.createElement("span");
+    text.textContent = TOOL_CONFIG[id].label || id;
+    label.append(input, dot, text);
+    return label;
+  }));
 }
 
 function init() {
   loadState();
+  buildToolControls();
+  buildTileControls();
   setMeta();
   syncControls();
+  applyLang();
+  document.getElementById("lang").addEventListener("change", (e) => {
+    if (!LOCALES.includes(e.target.value)) return;
+    state.lang = e.target.value;
+    saveState(); applyLang(); render();
+  });
   document.querySelectorAll("#presets button").forEach((b) =>
     b.addEventListener("click", () => {
       document.querySelectorAll("#presets button").forEach((x) => x.classList.remove("active"));
@@ -469,15 +769,27 @@ function init() {
       saveState(); render();
     })
   );
-  document.querySelectorAll("#tools button").forEach((b) =>
-    b.addEventListener("click", () => {
-      const t = b.dataset.tool;
-      if (state.tools.has(t)) { state.tools.delete(t); b.classList.remove("on"); }
-      else { state.tools.add(t); b.classList.add("on"); }
+  document.querySelectorAll("#tools input[data-tool]").forEach((input) =>
+    input.addEventListener("change", () => {
+      const t = input.dataset.tool;
+      if (input.checked) state.tools.add(t); else state.tools.delete(t);
       state.shown = 50;
       saveState(); render();
     })
   );
+  document.querySelectorAll("#tiles-menu input[data-kpi]").forEach((input) =>
+    input.addEventListener("change", () => {
+      const id = input.dataset.kpi;
+      if (input.checked) state.kpis.add(id); else state.kpis.delete(id);
+      saveState(); render();
+    })
+  );
+  const tilesPicker = document.getElementById("tiles-picker");
+  if (tilesPicker) {
+    document.addEventListener("click", (e) => {
+      if (tilesPicker.open && !tilesPicker.contains(e.target)) tilesPicker.open = false;
+    });
+  }
   document.getElementById("project").addEventListener("change", (e) => { state.project = e.target.value; state.shown = 50; saveState(); render(); });
   document.getElementById("group").addEventListener("change", (e) => {
     state.group = e.target.value; saveState(); render();
@@ -498,15 +810,34 @@ function init() {
   }
   const gbtn = document.getElementById("gnomes");
   if (gbtn) {
-    gbtn.textContent = "gnomes: " + (state.gnomes ? "on" : "off");
-    gbtn.addEventListener("click", () => {
-      state.gnomes = !state.gnomes; saveState();
-      gbtn.textContent = "gnomes: " + (state.gnomes ? "on" : "off");
+    refreshGnomeBtn();
+    gbtn.addEventListener("change", () => {
+      state.gnomes = gbtn.checked; saveState();
+      refreshGnomeBtn();
+      render();
+    });
+  }
+  const cbtn = document.getElementById("crewstyle");
+  if (cbtn) {
+    refreshCrewBtn();
+    cbtn.addEventListener("change", (e) => {
+      if (!window.CREWS || !window.CREWS[e.target.value]) return;
+      state.crewStyle = e.target.value;
+      saveState();
       render();
     });
   }
   document.getElementById("sub").addEventListener("change", (e) => {
     state.includeSub = e.target.checked; state.shown = 50; saveState(); render();
+  });
+  document.getElementById("hideheading").addEventListener("change", (e) => {
+    state.hideHeading = e.target.checked; saveState(); applyTitles();
+  });
+  document.getElementById("headingtext").addEventListener("input", (e) => {
+    state.headingText = e.target.value.slice(0, 60); saveState(); applyTitles();
+  });
+  document.getElementById("tabtitletext").addEventListener("input", (e) => {
+    state.tabTitleText = e.target.value.slice(0, 60); saveState(); applyTitles();
   });
   const custom = () => {
     const f = document.getElementById("from").value, t = document.getElementById("to").value;
@@ -520,7 +851,7 @@ function init() {
   document.getElementById("from").addEventListener("change", custom);
   document.getElementById("to").addEventListener("change", custom);
   document.getElementById("more").addEventListener("click", () => { state.shown += 50; render(); });
-  document.getElementById("subbaby").innerHTML = gnomeHead("#10A37F");
+  document.getElementById("subbaby").innerHTML = crewHead("#10A37F");
   document.querySelectorAll(".clerk").forEach((el) => { el.innerHTML = clerkSVG(); });
   const shut = new Set(state.collapsed);
   document.querySelectorAll(".chart-box[data-sec]").forEach((box) => {
@@ -625,7 +956,7 @@ function burnStats() {
 // 'flat' (direction carries no signal: sessions, averages — always muted).
 // Absurd jumps cap as a ×N multiplier instead of ▲5661%.
 function delta(cur, prev, pol = "neg") {
-  if (prev === 0) return cur === 0 ? ["—", "flat"] : ["▲ new", pol === "pos" ? "down" : pol === "flat" ? "flat" : "up"];
+  if (prev === 0) return cur === 0 ? ["—", "flat"] : [t("new_label"), pol === "pos" ? "down" : pol === "flat" ? "flat" : "up"];
   const pct = ((cur - prev) / Math.abs(prev)) * 100;
   if (Math.abs(pct) < 0.5) return ["0%", "flat"]; // rounds to zero: no direction
   const arrow = pct > 0 ? "▲ " : "▼ ";
@@ -666,7 +997,10 @@ function bucketize(recs, from, to) {
     monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
     return monday.getTime();
   };
-  const blank = () => ({ claude: 0, codex: 0, opencode: 0, cost: { claude: 0, codex: 0, opencode: 0 } });
+  const blank = () => ({
+    ...Object.fromEntries(TOOLS.map((tool) => [tool, 0])),
+    cost: Object.fromEntries(TOOLS.map((tool) => [tool, 0])),
+  });
   const buckets = new Map();
   // Zero-fill the full span so dead hours/days render as gaps, not shifted bars.
   if (Number.isFinite(from) && Number.isFinite(to) && to > from) {
@@ -684,17 +1018,18 @@ function bucketize(recs, from, to) {
   return [...buckets.values()].sort((a, b) => a.ts - b.ts);
 }
 function bucketLabel(ts, from, to) {
+  const loc = localeTag();
   const span = to - from;
   const d = new Date(ts);
-  if (span <= 6 * 3600000) return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (span <= 6 * 3600000) return d.toLocaleTimeString(loc, { hour: "numeric", minute: "2-digit" });
   if (span <= 2 * 86400000) {
     // Single-day window: hour alone ("1 AM"), no repeated "9/25" on every tick.
     if (new Date(from).toDateString() === new Date(to).toDateString()) {
-      return d.toLocaleTimeString([], { hour: "numeric" });
+      return d.toLocaleTimeString(loc, { hour: "numeric" });
     }
-    return d.toLocaleString([], { month: "numeric", day: "numeric", hour: "numeric" });
+    return d.toLocaleString(loc, { month: "numeric", day: "numeric", hour: "numeric" });
   }
-  return d.toLocaleDateString([], { month: "numeric", day: "numeric" });
+  return d.toLocaleDateString(loc, { month: "numeric", day: "numeric" });
 }
 
 function render() {
@@ -718,6 +1053,38 @@ function render() {
   renderCrew(recs, from, to);
   renderHeat(filtered(Date.now() - 28 * day, Date.now())); // heatmap always trailing 28d
   renderTable(recs);
+  renderPriceBook(recs);
+}
+
+// Every distinct model seen in the current window, with its resolved
+// per-1M rate and provenance side by side — an audit view, not a chart,
+// so a plain sorted table beats forcing this into the chart idiom.
+function renderPriceBook(recs) {
+  const box = document.getElementById("pricebook");
+  const meta = document.getElementById("pricemeta");
+  if (!box) return;
+  const priceMeta = (window.USAGE && window.USAGE.priceMeta) || {};
+  if (meta) {
+    const age = priceAge(priceMeta.fetchedAt);
+    meta.textContent = priceMeta.live
+      ? (age ? t("pb_meta_live_age", { age }) : t("pb_meta_live"))
+      : t("pb_meta_builtin");
+  }
+  const models = new Set();
+  for (const r of recs) models.add(r.model);
+  const rows = [...models].sort().map((m) => ({ model: m, info: priceInfo(m) }));
+  if (!rows.length) {
+    box.innerHTML = `<div style="color:var(--muted);font-size:0.8rem">${shrugSVG()}${t("no_models")}</div>`;
+    return;
+  }
+  box.innerHTML = `<table><thead><tr>
+    <th>${t("g_top_model")}</th><th>${t("pb_in")}</th><th>${t("pb_out")}</th><th>${t("pb_cread")}</th><th>${t("pb_cwrite")}</th><th>${t("pb_src")}</th>
+  </tr></thead><tbody>${rows.map(({ model, info }) => {
+    if (!info) return `<tr><td>${esc(model)}</td><td colspan="4" style="text-align:center;color:var(--muted)">${t("pb_unpriced")}</td><td class="src">—</td></tr>`;
+    const p = info.price;
+    const src = info.live ? `<span class="src live">${t("pb_live")}</span>` : `<span class="src">${t("pb_builtin")}</span>`;
+    return `<tr><td>${esc(model)}</td><td>${money(p.input)}</td><td>${money(p.output)}</td><td>${money(p.cacheRead)}</td><td>${money(p.cacheWrite)}</td><td>${src}</td></tr>`;
+  }).join("")}</tbody></table>`;
 }
 
 function prevRange(from, to) {
@@ -772,13 +1139,28 @@ function renderKpis(recs, prev, from = 0, to = 1) {
   // barbell scales with avg session size, receptionist greets new sessions.
   const ratio = burn.base > 0 ? burn.projected / burn.base : 0;
   const wspd = Math.min(1.2, Math.max(0.25, 1.2 - Math.log10(1 + ratio) * 0.4)).toFixed(2) + "s";
-  const wheel = `<span class="wheel${ratio > 2 ? " pant" : ""}" style="--wspd:${wspd}" title="Burning ×${burn.base > 0 ? mult(ratio) : "—"} of 30d pace${ratio > 2 ? " — panting!" : ""}"><span class="rim"></span><span class="ham">${gnomeHead("#6E56CF")}</span><span class="sweat"></span></span>`;
+  const wheelTip = state.lang === "zh-Hant"
+    ? `燃燒中：30 天平均的 ×${burn.base > 0 ? mult(ratio) : "—"}${ratio > 2 ? " — 喘不過氣了！" : ""}`
+    : `Burning ×${burn.base > 0 ? mult(ratio) : "—"} of 30d pace${ratio > 2 ? " — panting!" : ""}`;
+  const wheel = `<span class="wheel${ratio > 2 ? " pant" : ""}" style="--wspd:${wspd}" title="${wheelTip}"><span class="rim"></span><span class="ham">${crewHead("#6E56CF")}</span><span class="sweat"></span></span>`;
   const audit = a.coverage < 1;
-  const acct = `<span class="acct${audit ? " audit" : ""}" title="${audit ? fmt(a.unpriced) + " tokens await pricing" : "Fully priced"}"><span class="stmp">${audit ? "?" : "✓"}</span>${gnomeHead("#10A37F")}</span>`;
+  const acctTip = audit
+    ? t("tip_await", { n: fmt(a.unpriced) })
+    : t("tip_priced");
+  const acct = `<span class="acct${audit ? " audit" : ""}" title="${acctTip}"><span class="stmp">${audit ? "?" : "✓"}</span>${crewHead("#10A37F")}</span>`;
   const barW = Math.round(Math.min(28, Math.max(14, 14 + Math.log10(1 + a.avgActive) * 8)));
-  const lift = `<span class="lift" title="Barbell scales with avg active/session">${gnomeHead("#D97757")}<span class="bar" style="width:${barW}px"><i></i><i></i></span></span>`;
+  const heavy = a.avgActive > 0 && barW >= 26;
+  const liftTip = a.avgActive <= 0
+    ? t("tip_bar")
+    : (state.lang === "zh-Hant"
+      ? `每工作階段平均 ${fmt(a.avgActive)} 個活躍 token${heavy ? " — 重訓日！" : ""}`
+      : `${fmt(a.avgActive)} active tokens/session on average${heavy ? " — leg day!" : ""}`);
+  const lift = `<span class="lift${heavy ? " straining" : ""}" title="${liftTip}">${crewHead("#D97757")}<span class="bar" style="width:${barW}px"><i></i><i></i></span></span>`;
   const grew = lastSessN > 0 && a.sessions > lastSessN;
-  const recep = `<span class="recep" title="${grew ? "+" + (a.sessions - lastSessN) + " sessions since last tick" : a.sessions + " sessions in window"}">${gnomeHead("#6E56CF")}<span class="wave"></span>${grew ? `<span class="guest">${gnomeHead("#10A37F")}</span>` : ""}</span>`;
+  const recepTip = grew
+    ? t("tip_sess_new", { n: a.sessions - lastSessN })
+    : t("tip_sess_window", { n: a.sessions });
+  const recep = `<span class="recep" title="${recepTip}">${crewHead("#6E56CF")}<span class="wave"></span>${grew ? `<span class="guest">${crewHead("#10A37F")}</span>` : ""}</span>`;
   lastSessN = a.sessions;
   // Merchant faints when the priciest model costs 100x+ the cheapest per active token.
   const byModel = new Map();
@@ -798,27 +1180,31 @@ function renderKpis(recs, prev, from = 0, to = 1) {
   }
   const gap = cheap && dear && cheap.u > 0 ? dear.u / cheap.u : 0;
   const merchTitle = cheap && dear
-    ? `${String(dear.m).slice(0, 24)} ${money(dear.u * 1e6)}/1M vs ${String(cheap.m).slice(0, 24)} ${money(cheap.u * 1e6)}/1M (×${mult(gap)})`
-    : "No priced models in window";
-  const merch = `<span class="merch${gap > 100 ? " faint" : ""}" title="${merchTitle.replace(/"/g, "&quot;")}">${gnomeHead("#e0a100")}<span class="tag">$</span></span>`;
+    ? `${String(dear.m).slice(0, 24)} ${money(dear.u * 1e6)}/1M vs ${String(cheap.m).slice(0, 24)} ${money(cheap.u * 1e6)}/1M (×${mult(gap)})\n\n${priceTip(dear.m)}\n\n${priceTip(cheap.m)}`
+    : t("tip_merch_none");
+  const merch = `<span class="merch${gap > 100 ? " faint" : ""}" title="${esc(merchTitle)}">${crewHead("#e0a100")}<span class="tag">$</span></span>`;
   const full = a.cacheWrite > 0;
-  const bucket = `<span class="bucket${full ? " full" : ""}" title="${full ? fmt(a.cacheWrite) + " cache writes hauled" : "No cache writes — nothing to carry"}">${bucketSVG(full)}</span>`;
+  const bucketTip = full
+    ? t("tip_bucket_full", { n: fmt(a.cacheWrite) })
+    : t("tip_bucket_empty");
+  const bucket = `<span class="bucket${full ? " full" : ""}" title="${bucketTip}">${bucketSVG(full)}</span>`;
   const tiles = [
-    ["Total tokens", fmt(a.total), delta(a.total, b.total, "neg"), "", "", wrestle(a.total, b.total), spark(spTotal, delta(a.total, b.total, "neg")[1])],
-    ["Active tokens", fmt(a.active), delta(a.active, b.active, "neg"), "", "", wrestle(a.active, b.active), spark(spActive, delta(a.active, b.active, "neg")[1])],
-    ["Burn rate", fmt(burn.projected) + " proj", delta(burn.projected, burn.base, "neg"), "today pace vs 30d avg", wheel, wrestle(burn.projected, burn.base), spark(spActive, delta(burn.projected, burn.base, "neg")[1])],
-    ["Fresh input", fmt(a.input), delta(a.input, b.input, "neg"), "", "", wrestle(a.input, b.input), spark(spIn, delta(a.input, b.input, "neg")[1])],
-    ["Cache read", fmt(a.cacheRead), delta(a.cacheRead, b.cacheRead, "neg"), "", "", wrestle(a.cacheRead, b.cacheRead), spark(spRead, delta(a.cacheRead, b.cacheRead, "neg")[1])],
-    ["Cache write", fmt(a.cacheWrite), zeroNeutral(a.cacheWrite, b.cacheWrite), "", bucket, "", spark(spWrite, zeroNeutral(a.cacheWrite, b.cacheWrite)[1])],
-    ["Output", fmt(a.output), delta(a.output, b.output, "neg"), "", "", wrestle(a.output, b.output), spark(spOut, delta(a.output, b.output, "neg")[1])],
-    ["Cache hit rate", (a.hit * 100).toFixed(1) + "%", delta(a.hit, b.hit, "pos"), "", "", "", spark(spHit, delta(a.hit, b.hit, "pos")[1])],
-    ["Est. cost", money(a.cost), delta(a.cost, b.cost, "neg"), costPerMillionActive(a), merch, wrestle(a.cost, b.cost), spark(spCost, delta(a.cost, b.cost, "neg")[1])],
-    ["Cost coverage", (a.coverage * 100).toFixed(1) + "%", delta(a.coverage, b.coverage, "pos"), a.unpriced ? fmt(a.unpriced) + " unpriced" : "", acct, "", spark(spCov, delta(a.coverage, b.coverage, "pos")[1])],
-    ["Sessions", String(a.sessions), delta(a.sessions, b.sessions, "flat"), "", recep, wrestle(a.sessions, b.sessions), spark(spSess, "flat")],
-    ["Avg active", fmt(a.avgActive), delta(a.avgActive, b.avgActive, "flat"), "", lift, wrestle(a.avgActive, b.avgActive), spark(spAvg, "flat")],
+    ["total", t("k_total"), fmt(a.total), delta(a.total, b.total, "neg"), "", "", wrestle(a.total, b.total), spark(spTotal, delta(a.total, b.total, "neg")[1])],
+    ["active", t("k_active"), fmt(a.active), delta(a.active, b.active, "neg"), "", "", wrestle(a.active, b.active), spark(spActive, delta(a.active, b.active, "neg")[1])],
+    ["burn", t("k_burn"), fmt(burn.projected) + " " + t("proj"), delta(burn.projected, burn.base, "neg"), t("sub_burn"), wheel, wrestle(burn.projected, burn.base), spark(spActive, delta(burn.projected, burn.base, "neg")[1])],
+    ["input", t("k_input"), fmt(a.input), delta(a.input, b.input, "neg"), "", "", wrestle(a.input, b.input), spark(spIn, delta(a.input, b.input, "neg")[1])],
+    ["cread", t("k_cread"), fmt(a.cacheRead), delta(a.cacheRead, b.cacheRead, "neg"), "", "", wrestle(a.cacheRead, b.cacheRead), spark(spRead, delta(a.cacheRead, b.cacheRead, "neg")[1])],
+    ["cwrite", t("k_cwrite"), fmt(a.cacheWrite), zeroNeutral(a.cacheWrite, b.cacheWrite), "", bucket, "", spark(spWrite, zeroNeutral(a.cacheWrite, b.cacheWrite)[1])],
+    ["output", t("k_output"), fmt(a.output), delta(a.output, b.output, "neg"), "", "", wrestle(a.output, b.output), spark(spOut, delta(a.output, b.output, "neg")[1])],
+    ["hit", t("k_hit"), (a.hit * 100).toFixed(1) + "%", delta(a.hit, b.hit, "pos"), "", "", "", spark(spHit, delta(a.hit, b.hit, "pos")[1])],
+    ["cost", t("k_cost"), money(a.cost), delta(a.cost, b.cost, "neg"), costPerMillionActive(a), merch, wrestle(a.cost, b.cost), spark(spCost, delta(a.cost, b.cost, "neg")[1])],
+    ["cov", t("k_cov"), (a.coverage * 100).toFixed(1) + "%", delta(a.coverage, b.coverage, "pos"), a.unpriced ? fmt(a.unpriced) + " " + t("unpriced") : "", acct, "", spark(spCov, delta(a.coverage, b.coverage, "pos")[1])],
+    ["sess", t("k_sess"), String(a.sessions), delta(a.sessions, b.sessions, "flat"), "", recep, wrestle(a.sessions, b.sessions), spark(spSess, "flat")],
+    ["avg", t("k_avg"), fmt(a.avgActive), delta(a.avgActive, b.avgActive, "flat"), "", lift, wrestle(a.avgActive, b.avgActive), spark(spAvg, "flat")],
   ];
   document.getElementById("kpis").innerHTML = tiles
-    .map(([n, v, [d, c], sub, masc, w, sp]) => `<div class="kpi"><div class="name"><span class="nametext" title="${n}">${n}</span>${masc ? `<span class="mascot">${masc}</span>` : ""}</div><div class="val">${v}</div>${sp || ""}<div class="delta ${c}">${d}${w || ""}</div>${sub ? `<div class="delta flat" title="Unit cost on real work (cache excluded)">${sub}</div>` : ""}</div>`)
+    .filter(([id]) => state.kpis.has(id))
+    .map(([, n, v, [d, c], sub, masc, w, sp]) => `<div class="kpi"><div class="name"><span class="nametext" title="${n}">${n}</span>${masc ? `<span class="mascot">${masc}</span>` : ""}</div><div class="val">${v}</div>${sp || ""}<div class="delta ${c}">${d}${w || ""}</div>${sub ? `<div class="delta flat" title="Unit cost on real work (cache excluded)">${sub}</div>` : ""}</div>`)
     .join("");
 }
 
@@ -828,13 +1214,13 @@ function renderTimeCharts(recs, from, to, prevBuckets = []) {
   const live = TOOLS.filter((t) => buckets.some((b) => b[t] > 0 || b.cost[t] > 0));
   const shown = live.length ? live : TOOLS;
   // Dashed previous-period overlay, bucket-aligned (equal spans => equal counts).
-  const prevT = prevBuckets.map((b) => b.claude + b.codex + b.opencode);
-  const prevC = prevBuckets.map((b) => Math.round((b.cost.claude + b.cost.codex + b.cost.opencode) * 100) / 100);
+  const prevT = prevBuckets.map((b) => TOOLS.reduce((sum, tool) => sum + (b[tool] || 0), 0));
+  const prevC = prevBuckets.map((b) => Math.round(TOOLS.reduce((sum, tool) => sum + (b.cost[tool] || 0), 0) * 100) / 100);
   const hasPrev = prevT.some((v) => v > 0) || prevC.some((v) => v > 0);
   const showPT = state.prevT !== false && hasPrev; // undefined (old saves) = on
   const showPC = state.prevC !== false && hasPrev;
   const prevLine = (data, color, gaps) => ({
-    type: "line", label: "prev period", data, pointStyle: "line",
+    type: "line", label: t("prev_period"), data, pointStyle: "line",
     borderColor: color, borderDash: [5, 4], pointRadius: 0, tension: 0.3,
     ...(gaps ? { spanGaps: true } : {}),
   });
@@ -859,10 +1245,10 @@ function renderTimeCharts(recs, from, to, prevBuckets = []) {
   const progressFooter = (asMoney) => (items) => {
     if (!items.length) return "";
     const i = items[0].dataIndex;
-    const tot = buckets[i].claude + buckets[i].codex + buckets[i].opencode;
-    const ctot = buckets[i].cost.claude + buckets[i].cost.codex + buckets[i].cost.opencode;
+    const tot = TOOLS.reduce((sum, tool) => sum + (buckets[i][tool] || 0), 0);
+    const ctot = TOOLS.reduce((sum, tool) => sum + (buckets[i].cost[tool] || 0), 0);
     const lines = [asMoney ? `total ${money(ctot)} · ${fmt(tot)} tokens` : `total ${fmt(tot)} · ${money(ctot)}`];
-    if (partial && i === last) lines.push("current period in progress");
+    if (partial && i === last) lines.push(t("cur_progress"));
     return lines;
   };
   makeChart("c-tokens", {
@@ -900,15 +1286,16 @@ function renderMix(recs) {
   const agg = {};
   TOOLS.forEach((t) => (agg[t] = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 }));
   for (const r of recs) {
+    if (!agg[r.tool]) continue;
     agg[r.tool].input += r.input;
     agg[r.tool].cacheRead += r.cacheRead;
     agg[r.tool].cacheWrite += r.cacheWrite;
-    agg[r.tool].output += r.output + (r.tool === "opencode" ? r.reasoning : 0);
+    agg[r.tool].output += r.output + (r.reasoningSeparate ? r.reasoning : 0);
   }
   const rows = TOOLS.filter((t) => agg[t].input + agg[t].cacheRead + agg[t].cacheWrite + agg[t].output > 0);
   const shown = rows.length ? rows : TOOLS;
   const parts = [
-    ["input", "#8888cc"], ["cacheRead", "#4caf7d"], ["cacheWrite", "#e0a100"], ["output", "#d97757"],
+    ["input", t("mix_input"), "#8888cc"], ["cacheRead", t("mix_cread"), "#4caf7d"], ["cacheWrite", t("mix_cwrite"), "#e0a100"], ["output", t("mix_output"), "#d97757"],
   ];
   const totals = Object.fromEntries(shown.map((t) => [t, agg[t].input + agg[t].cacheRead + agg[t].cacheWrite + agg[t].output]));
   const valOf = (t, k) => (state.mixPct && totals[t] ? agg[t][k] / totals[t] * 100 : agg[t][k]);
@@ -917,14 +1304,18 @@ function renderMix(recs) {
     type: "bar",
     data: {
       labels: shown,
-      datasets: parts.map(([k, c]) => ({ label: k, data: shown.map((t) => Math.round(valOf(t, k) * 10) / 10), backgroundColor: c })),
+      datasets: parts.map(([k, lbl, c]) => ({ label: lbl, data: shown.map((t) => Math.round(valOf(t, k) * 10) / 10), backgroundColor: c })),
     },
     options: {
       indexAxis: "y", responsive: true,
       plugins: {
         tooltip: {
           callbacks: state.mixPct
-            ? { label: (ctx) => ` ${ctx.dataset.label}: ${ctx.parsed.x.toFixed(1)}% (${fmt(agg[ctx.label][ctx.dataset.label])})` }
+            ? { label: (ctx) => {
+              const part = parts.find((p) => p[1] === ctx.dataset.label);
+              const key = part ? part[0] : ctx.dataset.label;
+              return ` ${ctx.dataset.label}: ${ctx.parsed.x.toFixed(1)}% (${fmt(agg[ctx.label][key])})`;
+            } }
             : {},
         },
       },
@@ -952,23 +1343,46 @@ function renderModels(recs) {
     const k = groupKey(r);
     agg[k] = (agg[k] || 0) + totalOf(r);
   }
-  const titles = { model: "Top models", project: "Top projects", workspace: "Top workspaces", "tool+model": "Top tool+model", "workspace+model": "Top workspace+model" };
-  document.getElementById("group-title").textContent = titles[state.group] || "Top models";
+  const titles = { model: t("g_top_model"), project: t("g_top_project"), workspace: t("g_top_workspace"), "tool+model": t("g_top_toolmodel"), "workspace+model": t("g_top_wmodel") };
+  document.getElementById("group-title").textContent = titles[state.group] || t("g_top_model");
   const top = Object.entries(agg).sort((a, b) => b[1] - a[1]).slice(0, 10);
   const sum = top.reduce((x, [, v]) => x + v, 0);
   const cm = document.getElementById("c-models");
   if (cm && state.group === "model" && top.length) {
-    cm.title = `Crowned: ${top[0][0]} at ${fmt(top[0][1])} (${(top[0][1] / (sum || 1) * 100).toFixed(0)}% of window)`;
+    cm.setAttribute("aria-label", `Crowned: ${top[0][0]} at ${fmt(top[0][1])} (${(top[0][1] / (sum || 1) * 100).toFixed(0)}% of window)`);
   } else if (cm) {
-    cm.title = "";
+    cm.removeAttribute("aria-label");
   }
+  // Model dimension lives at the end of a "tool+model"/"workspace+model" key
+  // (split on the group's own separator); plain "model" grouping is the key
+  // itself. Any other grouping has no single model to price.
+  const modelOf = (label) => {
+    if (state.group === "model") return label;
+    if (state.group === "tool+model" || state.group === "workspace+model") {
+      const i = label.indexOf(":");
+      return i >= 0 ? label.slice(i + 1) : null;
+    }
+    return null;
+  };
   makeChart("c-models", {
     type: "bar",
     data: {
       labels: top.map(([m]) => m),
       datasets: [{ data: top.map(([, v]) => v), backgroundColor: "#6E56CF" }],
     },
-    options: { indexAxis: "y", responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { callback: fmt, maxTicksLimit: 8 } } } },
+    options: {
+      indexAxis: "y", responsive: true, plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            afterBody(items) {
+              const model = modelOf(items[0]?.label);
+              return model ? priceTip(model).split("\n").slice(1) : [];
+            },
+          },
+        },
+      }, scales: { x: { ticks: { callback: fmt, maxTicksLimit: 8 } } },
+    },
     plugins: [climberPlugin],
   });
 }
@@ -1052,19 +1466,23 @@ function renderCostSessions(recs) {
   for (const r of recs) {
     if (r.cost == null) continue;
     const k = r.tool + ":" + r.session;
-    if (!groups.has(k)) groups.set(k, { tool: r.tool, title: r.title || r.session.slice(0, 8), cost: 0, total: 0 });
+    if (!groups.has(k)) groups.set(k, { tool: r.tool, title: r.title || r.session.slice(0, 8), cost: 0, total: 0, models: new Set() });
     const g = groups.get(k);
     g.cost += r.cost;
     g.total += totalOf(r);
+    g.models.add(r.model);
   }
   const top = [...groups.values()].sort((a, b) => b.cost - a.cost).slice(0, 10);
   const maxCost = Math.max(0, ...top.map((g) => g.cost));
   document.getElementById("topsess").innerHTML = top.length
     ? `<table><tbody>${top.map((g) => {
       const share = maxCost > 0 ? g.cost / maxCost : 0;
-      const w = Math.round(9 + 13 * share);
+      const w = Math.round(11 + 15 * share);
       const lean = Math.round(share * 12);
-      return `<tr><td><span class="dot" style="background:${COLORS[g.tool]}"></span>${g.tool}</td><td title="${String(g.title).replace(/"/g, "&quot;")}">${String(g.title).length > 34 ? String(g.title).slice(0, 34) + "…" : g.title}</td><td class="num">${fmt(g.total)}</td><td class="num"><span class="porter" style="width:${w}px;transform:rotate(${lean}deg)" title="Porter strains under ${money(g.cost)}">${gnomeHead(COLORS[g.tool])}</span> ${money(g.cost)}</td></tr>`;
+      const title = String(g.title);
+      const shortTitle = title.length > 34 ? title.slice(0, 34) + "…" : title;
+      const porterTip = `Porter strains under ${money(g.cost)}\n\n${[...g.models].map(priceTip).join("\n\n")}`;
+      return `<tr><td><span class="dot" style="background:${COLORS[g.tool]}"></span>${esc(g.tool)}</td><td title="${esc(title)}">${esc(shortTitle)}</td><td class="num">${fmt(g.total)}</td><td class="num"><span class="porter" style="width:${w}px;transform:rotate(${lean}deg)" title="${esc(porterTip)}">${crewHead(COLORS[g.tool])}</span> ${money(g.cost)}</td></tr>`;
     }).join("")}</tbody></table>`
     : `<div style="color:var(--muted);font-size:0.8rem">${shrugSVG()}No priced sessions in range.</div>`;
 }
@@ -1079,7 +1497,7 @@ function renderCostModels(recs) {
   const csum = top.reduce((x, [, v]) => x + v, 0);
   const cc = document.getElementById("c-costmodels");
   if (cc) {
-    cc.title = top.length ? `Crowned: ${top[0][0]} at ${money(top[0][1])} (${(top[0][1] / (csum || 1) * 100).toFixed(0)}% of window cost)` : "";
+    cc.setAttribute("aria-label", top.length ? `Crowned: ${top[0][0]} at ${money(top[0][1])} (${(top[0][1] / (csum || 1) * 100).toFixed(0)}% of window cost)` : "");
   }
   makeChart("c-costmodels", {
     type: "bar",
@@ -1087,7 +1505,12 @@ function renderCostModels(recs) {
       labels: top.map(([m]) => m),
       datasets: [{ data: top.map(([, v]) => Math.round(v * 100) / 100), backgroundColor: "#e0a100" }],
     },
-    options: { indexAxis: "y", responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { callback: (v) => "$" + v } } } },
+    options: {
+      indexAxis: "y", responsive: true, plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { afterBody: (items) => priceTip(items[0]?.label).split("\n").slice(1) } },
+      }, scales: { x: { ticks: { callback: (v) => "$" + v } } },
+    },
     plugins: [climberPlugin],
   });
 }
@@ -1118,9 +1541,15 @@ const climberPlugin = {
       return;
     }
     meta.data.forEach((bar, i) => {
-      const s = max > 0 ? 5 + 7 * (vals[i] / max) : 5;
+      const s = max > 0 ? 6 + 8 * (vals[i] / max) : 6;
       ctx.save();
       ctx.translate(bar.x + s * 0.8, bar.y);
+      const customClimber = crewDef(state.crewStyle).climber;
+      if (typeof customClimber === "function") {
+        customClimber(ctx, s, i === 0);
+        ctx.restore();
+        return;
+      }
       ctx.fillStyle = "#e0a100";
       ctx.beginPath();
       ctx.moveTo(0, -s); ctx.lineTo(-s * 0.55, -s * 0.25); ctx.lineTo(s * 0.55, -s * 0.25);
@@ -1158,39 +1587,303 @@ function metricFmt(v) {
 // Click a gnome to toggle its tool filter. Gem sack scales with window cost,
 // green cart bar shows the tool's cache hit rate.
 function toggleTool(t) {
-  const b = document.querySelector(`#tools button[data-tool="${t}"]`);
-  if (state.tools.has(t)) { state.tools.delete(t); if (b) b.classList.remove("on"); }
-  else { state.tools.add(t); if (b) b.classList.add("on"); }
+  const input = document.querySelector(`#tools input[data-tool="${t}"]`);
+  if (state.tools.has(t)) state.tools.delete(t); else state.tools.add(t);
+  if (input) input.checked = state.tools.has(t);
   state.shown = 50; saveState(); render();
 }
-function gnomeSVG(tool) {
-  const hat = COLORS[tool] || "#888";
-  // Tools drawn relative to the hand at (0,0): handle root overlaps the
-  // hand dot so the implement reads as held, not floating.
-  const tools = {
-    claude: '<line x1="0" y1="1" x2="9" y2="-14" stroke="#8a6b4a" stroke-width="3"/><path d="M3 -16 Q9 -21 15 -14" stroke="#9aa0a6" stroke-width="2.5" fill="none"/>',
-    codex: '<line x1="0" y1="1" x2="9" y2="-14" stroke="#8a6b4a" stroke-width="3"/><ellipse cx="11" cy="-17" rx="4" ry="5" fill="#9aa0a6"/>',
-    opencode: '<line x1="0" y1="1" x2="9" y2="-14" stroke="#8a6b4a" stroke-width="3"/><rect x="4" y="-22" width="14" height="7" rx="1.5" fill="#9aa0a6"/>',
-  };
-  return `<svg viewBox="0 0 64 56" aria-hidden="true"><g class="bob">`
-    + `<rect x="20" y="36" width="24" height="16" rx="5" fill="#425487"/>`
-    + `<rect x="20" y="44" width="24" height="3" fill="#2b3550"/>`
-    + `<circle cx="32" cy="30" r="9" fill="#f2c9a0"/>`
-    + `<polygon points="24,34 40,34 32,50" fill="#dcdce0"/>`
-    + `<circle cx="32" cy="31" r="2" fill="#d99a6c"/>`
-    + `<polygon points="32,2 16,24 48,24" fill="${hat}"/>`
-    + `<rect x="12" y="22" width="40" height="5" rx="2" fill="${hat}"/>`
-    + `<circle cx="32" cy="4" r="2.5" fill="#fff"/>`
-    + `<line x1="40" y1="42" x2="44" y2="40" stroke="#f2c9a0" stroke-width="3"/>`
-    + `<circle cx="44" cy="40" r="2.5" fill="#f2c9a0"/>`
-    + `<g class="swing" transform="translate(44,40)">${tools[tool] || tools.codex}</g>`
-    + `</g></svg>`;
+// Hand-held implement per crew style (hand root at 0,0, drawn upward).
+// Crew implements dispatch through the registry (crews/<id>.js).
+function figImpl(tool) {
+  // Thin dispatcher: implements live in crews/<id>.js as def.impl.
+  const style = (typeof state !== "undefined" && state.crewStyle) || "gnomes";
+  const col = COLORS[tool] || "#888";
+  const grip = `<line x1="0" y1="1" x2="7" y2="-11" stroke="#8a6b4a" stroke-width="3"/>`;
+  return crewDef(style).impl(tool, { grip, col, COLORS });
 }
 
-// Pocket-size gnome head for tile mascots, row porters and flags.
-function gnomeHead(color) {
-  return `<svg class="ghead" viewBox="0 0 40 40" aria-hidden="true"><polygon points="20,2 8,20 32,20" fill="${color}"/><rect x="6" y="18" width="28" height="4" rx="2" fill="${color}"/><circle cx="20" cy="25" r="7" fill="#f2c9a0"/><polygon points="14,28 26,28 20,37" fill="#dcdce0"/><circle cx="20" cy="26" r="1.6" fill="#d99a6c"/></svg>`;
+
+
+// Head dispatcher: gnome hat or crew face, following crew style.
+function crewHead(color) {
+  // Thin dispatcher: heads live in crews/<id>.js as def.head.
+  const map = { "#d97757": "claude", "#10a37f": "codex", "#6e56cf": "opencode" };
+  const key = map[String(color).toLowerCase()] || "generic";
+  return crewDef(state.crewStyle).head(key, color);
 }
+
+// Page pets: the shared controller owns scheduling and movement. Each crew
+// owns its art and may provide a petProfile for personality, pacing and copy.
+// Crews without a profile retain the original generic behavior.
+const PET_SHADOW = `<ellipse cx="32" cy="60.5" rx="15" ry="2.8" fill="rgba(0,0,0,0.25)"/>`;
+// Humanoid rig: P = {skin,arm,back,open,shut,deco,cover,smile,napMouth,
+// top,bottoms,legCol,shoe}. cover draws last (hats, fringe, beards).
+function humanPet(P, pose, f) {
+  const shut = pose === "nap";
+  const headInner = (P.back || "")
+    + `<circle cx="32" cy="21" r="12" fill="${P.skin}"/>`
+    + (shut ? P.shut : P.open) + (P.deco || "")
+    + (shut ? P.napMouth : P.smile) + (P.cover || "");
+  const armCol = P.arm || P.skin;
+  const armL = `<line x1="24" y1="34" x2="20" y2="44" stroke="${armCol}" stroke-width="3.4" stroke-linecap="round"/>`
+    + `<circle cx="20" cy="45" r="2.4" fill="${P.skin}"/>`;
+  let lower = "", armR = "", rock = "", extra = "";
+  if (pose === "sit" || pose === "nap") {
+    lower = `<rect x="22" y="48" width="10" height="5" rx="2.5" fill="${P.legCol}"/>`
+      + `<rect x="32" y="48" width="10" height="5" rx="2.5" fill="${P.legCol}"/>`
+      + `<ellipse cx="24" cy="51.5" rx="3.2" ry="2.1" fill="${P.shoe}"/><ellipse cx="40" cy="51.5" rx="3.2" ry="2.1" fill="${P.shoe}"/>`;
+    armR = `<line x1="40" y1="34" x2="43" y2="44" stroke="${armCol}" stroke-width="3.4" stroke-linecap="round"/>`
+      + `<circle cx="43" cy="45" r="2.4" fill="${P.skin}"/>`;
+  } else if (pose === "wave") {
+    const up = f % 2 === 0;
+    armR = `<line x1="40" y1="34" x2="${up ? 52 : 54}" y2="${up ? 20 : 24}" stroke="${armCol}" stroke-width="3.4" stroke-linecap="round"/>`
+      + `<circle cx="${up ? 52 : 54}" cy="${up ? 19 : 23}" r="2.6" fill="${P.skin}"/>`;
+    lower = `<rect x="25" y="48" width="5.5" height="9" fill="${P.legCol}"/><rect x="33.5" y="48" width="5.5" height="9" fill="${P.legCol}"/>`
+      + `<ellipse cx="27.5" cy="58" rx="3.6" ry="2.2" fill="${P.shoe}"/><ellipse cx="36.5" cy="58" rx="3.6" ry="2.2" fill="${P.shoe}"/>`;
+  } else {
+    // walk + run: alternate stride + waddle rock so feet match ground.
+    const a = f % 2 === 0;
+    const lift = pose === "run" ? 6 : 3.5, spread = pose === "run" ? 4 : 1.5;
+    const legL = a ? 48 - lift : 48, legR = a ? 48 : 48 - lift;
+    rock = pose === "run" ? (a ? ` rotate(8 32 48)` : ` rotate(-8 32 48)`) : (a ? ` rotate(3.5 32 48)` : ` rotate(-3.5 32 48)`);
+    lower = `<rect x="${25 - (a ? spread : 0)}" y="${legL}" width="5.5" height="10" fill="${P.legCol}"/>`
+      + `<rect x="${33.5 + (a ? spread : 0)}" y="${legR}" width="5.5" height="10" fill="${P.legCol}"/>`
+      + `<ellipse cx="${27.5 - (a ? spread : 0)}" cy="${legL + 10}" rx="3.6" ry="2.2" fill="${P.shoe}"/>`
+      + `<ellipse cx="${36.5 + (a ? spread : 0)}" cy="${legR + 10}" rx="3.6" ry="2.2" fill="${P.shoe}"/>`;
+    armR = `<line x1="40" y1="34" x2="43" y2="${a ? 46 : 42}" stroke="${armCol}" stroke-width="3.4" stroke-linecap="round"/>`
+      + `<circle cx="43" cy="${a ? 47 : 43}" r="2.4" fill="${P.skin}"/>`;
+    if (pose === "run") extra = `<line x1="6" y1="36" x2="16" y2="36" stroke="var(--muted)" stroke-width="1.6" stroke-linecap="round"/>`
+      + `<line x1="3" y1="43" x2="15" y2="43" stroke="var(--muted)" stroke-width="1.6" stroke-linecap="round"/>`;
+  }
+  const ang = (rock.match(/-?[\d.]+/) || [0])[0];
+  return `<svg viewBox="0 0 64 64" aria-hidden="true">` + PET_SHADOW
+    + `<g transform="rotate(${ang} 32 48)">`
+    + extra + P.bottoms + lower + P.top + armL + armR + headInner
+    + `</g></svg>`;
+}
+// Dispatcher: pet matches the selected crew style (art in crews/<id>.js).
+function petFig(pose, f) {
+  return crewDef((typeof state !== "undefined" && state.crewStyle) || "gnomes").pet(pose, f);
+}
+
+const DEFAULT_PET_PROFILE = {
+  greetings: ["hi!", "hello!", "let's grow!", "nice work!"],
+  weights: { walk: 40, run: 17, sit: 17, wave: 15, hop: 10, nap: 11, spin: 7 },
+  speed: { walk: [40, 110], run: [200, 360] },
+  timing: { sit: [1500, 6000], wave: [1500, 2400], nap: [5000, 11000], hopDuration: .5 },
+  labels: { wave: "wave", walk: "walk", run: "run" },
+  interaction: "wave",
+};
+function activePetProfile() {
+  const def = crewDef((typeof state !== "undefined" && state.crewStyle) || "gnomes");
+  const p = def.petProfile || {};
+  return {
+    greetings: p.greetings || DEFAULT_PET_PROFILE.greetings,
+    weights: Object.assign({}, DEFAULT_PET_PROFILE.weights, p.weights || {}),
+    speed: Object.assign({}, DEFAULT_PET_PROFILE.speed, p.speed || {}),
+    timing: Object.assign({}, DEFAULT_PET_PROFILE.timing, p.timing || {}),
+    labels: Object.assign({}, DEFAULT_PET_PROFILE.labels, p.labels || {}),
+    interaction: p.interaction || DEFAULT_PET_PROFILE.interaction,
+  };
+}
+
+(function pagePet() {
+  const el = document.getElementById("pagepet");
+  const fig = document.getElementById("petfig");
+  const bub = document.getElementById("petbubble");
+  if (!el || !fig || typeof petFig === "undefined") return;
+  const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  let x = Math.min(window.innerWidth - 160, rnd(60, 300));
+  let dir = Math.random() < 0.5 ? -1 : 1, mode = "sit", frame = 0, target = null, speed = 0, after = null;
+  let resume = null, hopsLeft = 0;
+  let bubbleTimer = 0, pending = false, watchX = null;
+  const rawTimeout = window.setTimeout.bind(window);
+  const rawClear = window.clearTimeout.bind(window);
+  // Tracked timer: watchdog knows a trick is already queued.
+  function arm(fn, ms) {
+    pending = true;
+    return rawTimeout(() => { pending = false; fn(); }, ms);
+  }
+  function say(txt, ms) {
+    if (!bub) return;
+    bub.textContent = txt;
+    bub.hidden = false;
+    clearTimeout(bubbleTimer);
+    bubbleTimer = setTimeout(() => { bub.hidden = true; }, ms || 1500);
+  }
+  // Split render: figure art only rebuilds on pose/frame change;
+  // position updates every animation frame for smooth gliding.
+  let figKey = "", petStyle = "";
+  function paintFig() {
+    const st = (typeof state !== "undefined" && state.crewStyle) || "gnomes";
+    const key = st + "|" + (mode === "hop" ? "run" : mode) + ":" + frame;
+    if (key === figKey) return;
+    figKey = key; petStyle = st;
+    fig.innerHTML = petFig(mode === "hop" ? "run" : mode, frame);
+    const label = activePetProfile().labels[mode === "hop" ? "run" : mode] || mode;
+    el.title = "Page pet: " + label + "; click to interact";
+  }
+  function place() {
+    if (!isFinite(x)) x = clampX(300); // never strand the pet off-world
+    fig.style.transform = dir < 0 ? "scaleX(-1)" : "none";
+    el.style.transform = `translateX(${x.toFixed(1)}px)`;
+    el.dataset.mode = mode === "hop" ? "walk" : mode;
+  }
+  function draw() { paintFig(); place(); }
+  function clampX(v) { return Math.max(0, Math.min(window.innerWidth - 144, v)); }
+  const pickGreet = () => {
+    const lines = activePetProfile().greetings;
+    return lines[Math.floor(Math.random() * lines.length)];
+  };
+  // Weighted trick bag; weights jitter every draw so streaks happen.
+  function drawTrick() {
+    const weights = activePetProfile().weights;
+    const bag = Object.entries(weights).map(([name, weight]) => [name, Math.max(0, weight) * rnd(.85, 1.15)]);
+    let total = 0;
+    for (const [, w] of bag) total += w;
+    let r = Math.random() * total;
+    for (const [name, w] of bag) { r -= w; if (r <= 0) return name; }
+    return "walk";
+  }
+  function wander() {
+    const trick = drawTrick();
+    const profile = activePetProfile();
+    resume = null;
+    if (trick === "walk") {
+      mode = "walk"; speed = rnd(...profile.speed.walk);
+      // Nearby amble or cross-page trek, either direction.
+      target = Math.random() < 0.45 ? clampX(x + rnd(-1, 1) * rnd(60, 420)) : clampX(rnd(0, window.innerWidth - 144));
+    } else if (trick === "run") {
+      mode = "run"; speed = rnd(...profile.speed.run);
+      // Random far point, edge, or sudden U-turn mid-dash.
+      target = Math.random() < 0.5 ? clampX(rnd(0, window.innerWidth - 144)) : (dir > 0 ? clampX(window.innerWidth - 144) : 0);
+      if (Math.abs(target - x) < 60) { dir = -dir; target = clampX(x + dir * rnd(200, 500)); }
+    } else if (trick === "sit") {
+      mode = "sit"; target = null;
+      if (Math.random() < 0.3) dir = -dir; // look around for no reason
+      after = arm(wander, rnd(...profile.timing.sit));
+    } else if (trick === "wave" || trick === "special") {
+      mode = trick; target = null; frame = 0;
+      say(pickGreet(), rnd(1100, 1800));
+      after = arm(wander, rnd(...profile.timing.wave));
+    } else if (trick === "hop") {
+      mode = "hop"; target = null; frame = 0; hopsLeft = 3 + Math.floor(rnd(0, 4));
+      if (Math.random() < 0.5) dir = -dir;
+    } else if (trick === "spin") {
+      mode = "wave"; target = null; frame = 0;
+      dir = -dir; // whip around + wave reads as a twirl
+      say(pickGreet(), 1300);
+      after = arm(() => { if (Math.random() < 0.5) { dir = -dir; } wander(); }, rnd(1200, 2000));
+    } else {
+      mode = "nap"; target = null;
+      after = arm(() => { mode = activePetProfile().interaction; frame = 0; say(pickGreet()); draw(); after = arm(wander, rnd(...activePetProfile().timing.wave)); }, rnd(...profile.timing.nap));
+    }
+    if (target != null) dir = target >= x ? 1 : -1;
+    draw();
+  }
+  // rAF movement: velocity eases toward cruise speed and bleeds off near
+  // the target; stride frames flip per distance travelled so feet match
+  // ground speed. Hops ride a sine lift; waves toggle on a timer.
+  let last = performance.now(), vel = 0, dist = 0, waveAcc = 0, hopT = 0;
+  function arrive() {
+    x = target; target = null; vel = 0;
+    if (mode === "run") { mode = "sit"; draw(); after = arm(wander, rnd(1000, 3500)); return; }
+    const r = Math.random();
+    if (r < 0.3) { mode = activePetProfile().interaction; frame = 0; waveAcc = 0; say(pickGreet(), rnd(1100, 1700)); after = arm(wander, rnd(...activePetProfile().timing.wave)); }
+    else if (r < 0.42) { mode = "hop"; frame = 0; hopT = 0; hopsLeft = 2 + Math.floor(rnd(0, 3)); }
+    else { mode = "sit"; after = arm(wander, rnd(1500, 5000)); }
+    draw();
+  }
+  function tick(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    // Crew style switched mid-roam: swap costume immediately.
+    const st = (typeof state !== "undefined" && state.crewStyle) || "gnomes";
+    if (st !== petStyle) { figKey = ""; paintFig(); place(); }
+    if (!reduced) {
+      if (mode === "walk" || mode === "run") {
+        if (target != null) {
+          // Random mid-stroll interruption: stop and wave, then carry on.
+          if (mode === "walk" && resume == null && Math.random() < dt * 0.07 && Math.abs(target - x) > 80) {
+            resume = { target, speed };
+            target = null; vel = 0; mode = activePetProfile().interaction; frame = 0; waveAcc = 0;
+            say(pickGreet(), 1300);
+            draw();
+            after = arm(() => {
+              const r = resume; resume = null;
+              if (!r) { wander(); return; }
+              mode = "walk"; speed = r.speed; target = r.target;
+              dir = target >= x ? 1 : -1;
+              draw();
+            }, rnd(1300, 1900));
+          } else {
+            // Random dash U-turn.
+            if (mode === "run" && Math.random() < dt * 0.045 && Math.abs(target - x) > 120) {
+              target = clampX(x - Math.sign(target - x) * rnd(150, 450));
+              dir = target >= x ? 1 : -1;
+            }
+            // Ease: full cruise far away, bleed off within ~60px.
+            const want = speed * Math.min(1, Math.abs(target - x) / 60 + 0.12);
+            vel += (want - vel) * Math.min(1, dt * 7);
+            const wobble = 1 + Math.sin(now / 130) * 0.07; // unsteady feet
+            const step = vel * wobble * dt;
+            const d = Math.sign(target - x) * Math.min(Math.abs(step), Math.abs(target - x));
+            x += d; dist += Math.abs(d);
+            const strideEvery = mode === "run" ? 20 : 13;
+            if (dist >= strideEvery) { dist = 0; frame++; paintFig(); }
+            if (Math.abs(target - x) < 1) arrive();
+            else place();
+          }
+        } else place();
+      } else if (mode === "hop") {
+        hopT += dt;
+        const hopDuration = activePetProfile().timing.hopDuration;
+        if (hopT >= hopDuration) {
+          hopT = 0; frame++;
+          if (--hopsLeft <= 0) { mode = "sit"; draw(); after = arm(wander, rnd(1200, 4000)); }
+          else paintFig();
+        }
+        fig.style.marginBottom = (Math.sin(Math.PI * hopT / hopDuration) * 14).toFixed(1) + "px";
+      } else {
+        if (mode !== "wave" && mode !== "special" && fig.style.marginBottom && fig.style.marginBottom !== "0px") fig.style.marginBottom = "0";
+        if (mode === "wave" || mode === "special") {
+          waveAcc += dt;
+          if (waveAcc >= 0.22) { waveAcc = 0; frame++; paintFig(); }
+          // Double-take: sometimes flip direction mid-wave.
+          if (mode === "wave" && frame === 4 && target == null && resume == null && Math.random() < 0.25) { dir = -dir; place(); }
+        }
+      }
+    } else if (mode !== "sit") { mode = "sit"; draw(); }
+    requestAnimationFrame(tick);
+  }
+  el.addEventListener("click", () => {
+    if (reduced) { say(pickGreet()); return; }
+    rawClear(after); pending = false;
+    resume = null; target = null; mode = activePetProfile().interaction; frame = 0;
+    say(pickGreet(), 1500);
+    draw();
+    after = arm(wander, rnd(...activePetProfile().timing.wave));
+  });
+  window.addEventListener("resize", () => { x = clampX(x); draw(); });
+  draw();
+  // rAF with interval fallback + watchdog: if the frame loop or a timer
+  // ever dies, the pet self-heals instead of stranding in the corner.
+  if (window.requestAnimationFrame) requestAnimationFrame(tick);
+  else setInterval(() => tick(performance.now()), 50);
+  setInterval(() => {
+    if (reduced) return;
+    if (!pending && target == null && (mode === "sit" || mode === "wave" || mode === "special")) wander();
+    else if (mode === "walk" || mode === "run") {
+      // No progress for a full watchdog cycle: force recovery.
+      if (watchX != null && Math.abs(x - watchX) < 0.5) {
+        if (target != null) arrive(); else { mode = "sit"; wander(); }
+      }
+      watchX = x;
+    } else watchX = null;
+  }, 4000);
+  if (!reduced) { after = arm(wander, rnd(1500, 4000)); }
+})();
 
 function flagSVG() {
   return `<svg viewBox="0 0 14 14" aria-hidden="true"><line x1="3" y1="1" x2="3" y2="13" stroke="#9aa0a3" stroke-width="1.4"/><polygon points="3,1 13,4 3,7" fill="#6E56CF"/></svg>`;
@@ -1236,20 +1929,25 @@ function wrestle(cur, prev) {
   if (!(prev > 0) || !(cur >= 0)) return "";
   const r = cur / prev;
   if (r < 5 && r > 1 / 5) return "";
-  const champ = r >= 5 ? "current" : "previous";
+  const champ = r >= 5 ? t("vs_current") : t("vs_previous");
   const odds = r >= 1 ? mult(r) : mult(1 / r);
-  return `<span class="wrestle" title="Showdown: current ${fmt(cur)} vs previous ${fmt(prev)} — ${champ} wins ×${odds}">${gnomeHead("#D97757")}<span class="vs">vs</span>${gnomeHead("#10A37F")}</span>`;
+  const title = state.lang === "zh-Hant"
+    ? `對決：目前 ${fmt(cur)} vs 上期 ${fmt(prev)} — ${champ}獲勝 ×${odds}`
+    : `Showdown: current ${fmt(cur)} vs previous ${fmt(prev)} — ${champ} wins ×${odds}`;
+  return `<span class="wrestle" title="${title}">${crewHead("#D97757")}<span class="vs">vs</span>${crewHead("#10A37F")}</span>`;
 }
 
 function renderCrew(recs, from, to) {
   const crew = document.getElementById("crew");
   const btn = document.getElementById("gnomes");
   if (!crew) return;
-  if (btn) btn.textContent = "gnomes: " + (state.gnomes ? "on" : "off");
+  if (btn) refreshGnomeBtn();
+  refreshCrewBtn();
   crew.hidden = !state.gnomes;
   if (!state.gnomes) return;
-  if (!crew.children.length) {
-    crew.innerHTML = TOOLS.map((t) => `<div class="gnome" data-tool="${t}" role="button" tabindex="0" title="">${gnomeSVG(t)}<div class="tlabel">${t}</div><div class="rlabel"></div><div class="haul"><span class="sack">◆</span><span class="cart"><i></i></span></div><span class="zzz">z</span><span class="dust d1"></span><span class="dust d2"></span></div>`).join("");
+  if (!crew.children.length || crew.dataset.style !== state.crewStyle) {
+    crew.dataset.style = state.crewStyle;
+    crew.innerHTML = TOOLS.map((t) => `<div class="gnome" data-tool="${t}" role="button" tabindex="0" title="">${crewFig(t)}<div class="cinfo"><div class="tlabel">${t}</div><div class="rlabel"></div><div class="haul"><span class="sack">◆</span><span class="cart"><i></i></span></div></div><span class="zzz">z</span><span class="dust d1"></span><span class="dust d2"></span></div>`).join("");
     crew.querySelectorAll(".gnome").forEach((el) => {
       const toggle = () => toggleTool(el.dataset.tool);
       el.addEventListener("click", toggle);
@@ -1326,7 +2024,9 @@ function renderHeat(recs) {
     perDate.set(key, (perDate.get(key) || 0) + v);
   }
   const max = Math.max(1, ...grid.flat());
-  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const days = state.lang === "zh-Hant"
+    ? ["週一", "週二", "週三", "週四", "週五", "週六", "週日"]
+    : ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   let html = "<div></div>";
   for (let h = 0; h < 24; h++) html += `<div class="lbl" style="text-align:center">${h}</div>`;
   let struck = false; // richest vein gets the miner's gold outline
@@ -1338,7 +2038,7 @@ function renderHeat(recs) {
       const strike = !struck && v > 0 && v === max;
       if (strike) struck = true;
       const stilly = !v && h < 6 ? " stilly" : "";
-      html += `<div class="cell${strike ? " strike" : ""}${stilly}" title="${strike ? "Richest vein: " : stilly ? "Dead of night — no activity · " : ""}${metricFmt(v)}${state.metric === "cost" ? "" : " " + state.metric}" style="background:${bg};border:1px solid var(--border)"></div>`;
+      html += `<div class="cell${strike ? " strike" : ""}${stilly}" title="${strike ? t("richest") : stilly ? t("deadnight") : ""}${metricFmt(v)}${state.metric === "cost" ? "" : " " + t("m_" + state.metric)}" style="background:${bg};border:1px solid var(--border)"></div>`;
     });
   });
   document.getElementById("heatmap").innerHTML = html;
@@ -1360,24 +2060,24 @@ function renderHeat(recs) {
   const pct = (v) => (total ? (v / total * 100).toFixed(0) + "%" : "—");
   const costTotal = recs.reduce((x, r) => x + (r.cost || 0), 0);
   const rows = [
-    ["Peak hour", `<span class="pflag" title="Peak activity hour">${flagSVG()}</span> ` + peakH + ":00 · " + metricFmt(perHour[peakH])],
-    ["Peak weekday", days[peakD] + " · " + metricFmt(perDay[peakD])],
-    ["Quietest weekday", days[quietD] + " · " + metricFmt(perDay[quietD])],
-    ["Night share (0–6h)", `<span class="fisher" title="Night fisherman watches 0–6h">${rodSVG()}</span> ` + pct(night)],
-    ["Weekend share", pct(weekend)],
-    ["Active-day streak", streak + "d"],
-    ["Sessions in window", String(sessions.size)],
-    ["Cost in window", money(costTotal)],
+    [t("r_peak_h"), `<span class="pflag" title="${t("r_tip_peak")}">${flagSVG()}</span> ` + peakH + ":00 · " + metricFmt(perHour[peakH])],
+    [t("r_peak_d"), days[peakD] + " · " + metricFmt(perDay[peakD])],
+    [t("r_quiet"), days[quietD] + " · " + metricFmt(perDay[quietD])],
+    [t("r_night"), `<span class="fisher" title="${t("r_tip_night")}">${rodSVG()}</span> ` + pct(night)],
+    [t("r_weekend"), pct(weekend)],
+    [t("r_streak"), streak + "d"],
+    [t("r_sess"), String(sessions.size)],
+    [t("r_cost"), money(costTotal)],
   ];
   document.getElementById("rhythm").innerHTML =
     rows.map(([n, v]) => `<div class="rrow"><span class="rname">${n}</span><span class="rval">${v}</span></div>`).join("");
 }
 
 const COLS = [
-  ["tool", "Tool"], ["project", "Project"], ["workspace", "Workspace"], ["title", "Title / session"],
-  ["models", "Model(s)"], ["start", "Start"], ["duration", "Duration"],
-  ["input", "Input"], ["cacheRead", "Cache read"], ["output", "Output"],
-  ["active", "Active"], ["total", "Total"], ["cost", "Cost"],
+  ["tool", "col_tool"], ["project", "col_project"], ["workspace", "col_workspace"], ["title", "col_title"],
+  ["models", "col_models"], ["start", "col_start"], ["duration", "col_duration"],
+  ["input", "col_input"], ["cacheRead", "col_cread"], ["output", "col_output"],
+  ["active", "col_active"], ["total", "col_total"], ["cost", "col_cost"],
 ];
 let lastRecs = [];
 let lastSessN = 0; // receptionist gnome greets sessions arriving after this count
@@ -1403,7 +2103,7 @@ function renderTable(recs) {
     if (r.cost != null) { g.cost += r.cost; g.costKnown = true; }
   }
   lastRecs = [...groups.values()].map((g) => ({
-    ...g, models: [...g.models].join(", "), duration: g.end - g.start,
+    ...g, modelsTip: [...g.models].map(priceTip).join("\n\n"), models: [...g.models].join(", "), duration: g.end - g.start,
     cost: g.costKnown ? g.cost : null,
   }));
   lastRecs.sort((a, b) => {
@@ -1432,7 +2132,7 @@ function renderTable(recs) {
   thead.innerHTML = cols.map(([k, lbl]) => {
     const arrow = state.sortKey === k ? (state.sortDir === 1 ? " ▲" : " ▼") : "";
     const cls = ["input", "cacheRead", "output", "active", "total", "cost", "duration"].includes(k) ? ' class="num"' : "";
-    return `<th data-k="${k}"${cls}>${lbl}${arrow}</th>`;
+    return `<th data-k="${k}"${cls}>${t(lbl)}${arrow}</th>`;
   }).join("");
   thead.querySelectorAll("th").forEach((th) =>
     th.addEventListener("click", () => {
@@ -1445,14 +2145,16 @@ function renderTable(recs) {
   const tbody = document.querySelector("#sessions tbody");
   tbody.innerHTML = show.map((g) => {
     const label = (g.title || g.session.slice(0, 8)) + (g.est ? " ~" : "");
-    const tip = ((g.title ? g.title + " · " + g.session : g.session) + (g.est ? " · incl. estimated" : "")).replace(/"/g, "&quot;");
+    const tip = (g.title ? g.title + " · " + g.session : g.session) + (g.est ? " · incl. estimated" : "");
     const start = new Date(g.start).toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    const shortLabel = label.length > 40 ? label.slice(0, 40) + "…" : label;
+    const shortModels = g.models.length > 40 ? g.models.slice(0, 40) + "…" : g.models;
     return `<tr>
-      <td><span class="dot" style="background:${COLORS[g.tool]}"></span>${g.tool}</td>
-      <td>${g.project}</td>
-      ${showWs ? `<td>${g.workspace}</td>` : ""}
-      <td title="${tip}">${label.length > 40 ? label.slice(0, 40) + "…" : label}</td>
-      <td>${g.models.length > 40 ? g.models.slice(0, 40) + "…" : g.models}</td>
+      <td><span class="dot" style="background:${COLORS[g.tool]}"></span>${esc(g.tool)}</td>
+      <td>${esc(g.project)}</td>
+      ${showWs ? `<td>${esc(g.workspace)}</td>` : ""}
+      <td title="${esc(tip)}">${esc(shortLabel)}</td>
+      <td title="${esc(g.modelsTip)}">${esc(shortModels)}</td>
       <td>${start}</td><td>${dur(g.duration)}</td>
       <td class="num">${fmt(g.input)}</td><td class="num">${fmt(g.cacheRead)}</td>
       <td class="num">${fmt(g.output)}</td><td class="num">${fmt(g.active)}</td><td class="num">${fmt(g.total)}</td>
@@ -1516,7 +2218,10 @@ function setCourier(kind, title) {
   c.innerHTML = kind === "same" ? slateSVG() : parcelSVG();
 }
 
+let polling = false;
 async function poll() {
+  if (polling || document.hidden) return; // no overlap; hidden tabs skip work
+  polling = true;
   try {
     const headers = {};
     if (etag) headers["If-None-Match"] = etag;
@@ -1541,6 +2246,8 @@ async function poll() {
     }
   } catch {
     offline = true;
+  } finally {
+    polling = false;
   }
   tickLive();
 }
@@ -1548,12 +2255,13 @@ async function poll() {
 function startLive() {
   poll();
   setInterval(poll, 10000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
   setInterval(tickLive, 1000);
 }
 
 function initTheme() {
-  document.getElementById("theme").addEventListener("click", () => {
-    const next = THEMES[(THEMES.indexOf(themePref()) + 1) % THEMES.length];
+  document.getElementById("theme").addEventListener("change", (e) => {
+    const next = THEMES.includes(e.target.value) ? e.target.value : "auto";
     try { localStorage.setItem(THEME_KEY, next); } catch { /* private mode */ }
     applyTheme();
   });
@@ -1565,22 +2273,59 @@ function initTheme() {
   applyTheme();
 }
 
+function initSettingsDialog() {
+  const dialog = document.getElementById("settings-dialog");
+  const open = document.getElementById("settings-open");
+  const close = document.getElementById("settings-close");
+  open.addEventListener("click", () => dialog.showModal());
+  close.addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+}
+
+async function loadInstalledCrews() {
+  // The local server discovers direct .js files in both crews/ and the
+  // gitignored crews/private/. Placing code there is an explicit install and
+  // trust decision; review third-party crew files before adding them.
+  try {
+    const response = await fetch("/api/crews", { cache: "no-store" });
+    if (!response.ok) return;
+    const urls = await response.json();
+    const loaded = new Set([...document.scripts].map((script) => {
+      try { return new URL(script.src).pathname; } catch { return ""; }
+    }));
+    for (const url of urls) {
+      if (loaded.has(url)) continue;
+      await new Promise((resolve) => {
+        const script = document.createElement("script");
+        script.src = url;
+        script.onload = resolve;
+        script.onerror = resolve;
+        document.head.appendChild(script);
+      });
+    }
+  } catch { /* static snapshots and older servers retain built-in gnomes */ }
+}
+
 function boot() {
   if (!window.USAGE && !LIVE) {
     document.getElementById("nousage").hidden = false;
     document.getElementById("nousage").insertAdjacentHTML("afterbegin", shrugSVG());
-    initTheme();
+    loadState(); buildToolControls(); syncControls(); applyLang(); initTheme(); initSettingsDialog();
     return;
   }
   document.getElementById("app").hidden = false;
   if (window.USAGE) ALL = expand();
   init();
+  initSettingsDialog();
   if (LIVE) startLive();
   tickLive();
 }
 
 if (LIVE) {
-  boot(); // live payload arrives via /api/usage; data.js is never requested (no 404)
+  // Load installed public/private crews before restoring the selected style.
+  loadInstalledCrews().finally(boot); // data arrives via /api/usage; no data.js request
 } else {
   // Static snapshot (file://): fetch the generated payload next to this file.
   const s = document.createElement("script");
